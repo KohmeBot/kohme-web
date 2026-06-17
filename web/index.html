@@ -53,6 +53,13 @@
     .banner{background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);
       padding:9px 14px;border-radius:9px;margin:14px 0;font-size:14px;display:none}
     .banner.show{display:block}
+    #pluginDirty{align-items:center;gap:10px}
+    #pluginDirty.show{display:flex}
+    #pluginDirty .spacer{flex:1}
+    .tag.new{background:var(--accent);color:#fff}
+    .tag.del-tag{background:transparent;color:var(--danger);border:1px solid var(--danger)}
+    .card.isnew{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+    .card.pending-del{opacity:.55}
     .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
       padding:16px;margin-bottom:12px}
     .card .top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
@@ -96,6 +103,25 @@
       align-items:center;justify-content:center;z-index:20}
     .login{background:var(--panel);border:1px solid var(--line);border-radius:14px;
       padding:26px;width:340px;max-width:90vw}
+    .opbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+      width:780px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+    .ophead{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line)}
+    .ophead h1{font-size:16px}
+    .opstate{font-size:13px;font-weight:600;padding:3px 11px;border-radius:999px;border:1px solid var(--line)}
+    .opstate.running{color:var(--warn);background:var(--warn-soft);border-color:var(--warn)}
+    .opstate.ok{color:var(--ok);border-color:var(--ok)}
+    .opstate.err{color:var(--danger);border-color:var(--danger)}
+    .oplog{flex:1;overflow:auto;background:#0e0e12;color:#cfcfd6;font-family:var(--mono);
+      font-size:12.5px;line-height:1.55;padding:12px 16px;min-height:260px}
+    .oplog .l{white-space:pre-wrap;word-break:break-word}
+    .oplog .t{color:#6b6b78;margin-right:8px}
+    .oplog .line{color:#9ec5ff}
+    .opfoot{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--line)}
+    .spin{width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--accent);
+      border-radius:50%;animation:spin .8s linear infinite;flex:none}
+    .spin.hide{display:none}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){.spin{animation:none}}
     .hide{display:none}
     .hint{font-size:12.5px;color:var(--muted);margin-top:4px}
   </style>
@@ -118,6 +144,23 @@
 
     <div id="authErr" class="hint" style="color:var(--danger);margin-top:6px"></div>
     <button id="authBtn" class="primary" style="margin-top:14px;width:100%" onclick="submitAuth()">进入</button>
+  </div>
+</div>
+
+<div id="opOverlay" class="overlay hide">
+  <div class="opbox">
+    <div class="ophead">
+      <span id="opSpin" class="spin"></span>
+      <h1 id="opTitle">操作</h1>
+      <span class="spacer" style="flex:1"></span>
+      <span id="opState" class="opstate running">进行中…</span>
+    </div>
+    <div id="opLog" class="oplog"></div>
+    <div class="opfoot">
+      <span class="hint">构建 / 重启输出（实时）。构建失败时不会替换正在运行的 bot，且会回滚本次改动。</span>
+      <span class="spacer" style="flex:1"></span>
+      <button id="opClose" class="primary" onclick="closeOp()" disabled>关闭</button>
+    </div>
   </div>
 </div>
 
@@ -180,6 +223,12 @@
   </div>
 
   <h2 style="margin-top:24px">插件</h2>
+  <div id="pluginDirty" class="banner">
+    <span id="pluginDirtyText"></span>
+    <span class="spacer"></span>
+    <button class="primary" onclick="savePlugins(this)">保存并构建</button>
+    <button class="ghost" onclick="discardPlugins()">放弃更改</button>
+  </div>
   <div id="plugins"></div>
 
   <h2 style="margin-top:24px">添加插件</h2>
@@ -189,7 +238,7 @@
       <div><label class="f">仓库 repo</label><input id="nRepo" type="text" class="mono" placeholder="github.com/kohmebot/livebili"></div>
       <div><label class="f">版本 version</label><input id="nVer" type="text" placeholder="latest"></div>
     </div>
-    <div class="hint">添加后需要「重新构建并重启」才会真正拉取并编译进 bot。</div>
+    <div class="hint">添加只会把插件加入下方列表（仅公共配置；自定义配置 conf 需保存构建、bot 生成 schema 后才能编辑）。可继续增删多个插件，最后点列表上方的「保存并构建」一次性构建并重启。</div>
     <div class="row-actions"><button class="primary" onclick="addPlugin(this)">添加插件</button></div>
   </div>
 </div>
@@ -197,6 +246,7 @@
 <div class="console">
   <div class="chead">
     <span>运行日志</span>
+    <span style="color:#6b6b76;font-size:12px;margin-left:8px">仅 kohme 二进制输出（构建日志见操作弹窗）</span>
     <span class="spacer" style="flex:1"></span>
     <label class="sw" style="color:#bcbcc4;font-size:12px"><input type="checkbox" id="autoscroll" checked>自动滚动</label>
     <button onclick="document.getElementById('log').innerHTML=''">清空</button>
@@ -274,17 +324,29 @@
     return (s||'').split(/[,\n]/).map(x=>x.trim().replace(/^["']|["']$/g,'')).filter(Boolean);
   }
 
-  function pluginCard(p){
+  // pluginCard renders one plugin. opts.isNew marks a client-added, not-yet-saved
+  // plugin: its custom conf is hidden (the schema only exists after a build), and
+  // it shows only the common config. All edits are staged locally — the card
+  // exposes el._getDTO() and an el._deleted flag, and the global "保存并构建" bar
+  // commits every card at once.
+  function pluginCard(p, opts){
+    opts = opts || {};
+    const isNew = !!opts.isNew;
     const el = document.createElement('div');
-    el.className='card';
+    el.className = 'card' + (isNew?' isnew':'');
+    el._isNew = isNew;
+    el._deleted = false;
     const builtin = p.name=='core';
-    const schema = (window.schemas||{})[p.name];
+    const schema = isNew ? null : (window.schemas||{})[p.name];
+    const showConf = !isNew; // new plugins: common config only until built
     el.innerHTML = `
     <div class="top">
       <span class="name"></span>
       <span class="tag ${p.disable?'off':''}">${p.disable?'功能已禁用':'已启用'}</span>
       ${p.exclude?'<span class="tag off">不编译</span>':''}
       ${builtin?'<span class="tag off">内置</span>':''}
+      ${isNew?'<span class="tag new">新增·未保存</span>':''}
+      <span class="tag del-tag" style="display:none">待删除·保存后生效</span>
     </div>
     <div class="grid">
       <div><label class="f">仓库 repo</label><input data-k="repo" type="text" class="mono" ${builtin?'placeholder="内置插件，无仓库"':''}></div>
@@ -296,13 +358,14 @@
       <label class="sw"><input data-k="disable" type="checkbox">禁用功能（仍编译加载）</label>
       <label class="sw"><input data-k="exclude" type="checkbox">排除（不编译进 bot）</label>
     </div>
-    ${schema
-            ? `<details open><summary>插件配置 conf（表单）</summary><div data-conf-form style="margin-top:8px"></div></details>`
-            : `<details><summary>插件配置 conf（YAML）</summary><textarea data-k="conf" spellcheck="false" style="margin-top:8px"></textarea></details>`}
+    ${showConf
+            ? (schema
+                ? `<details open><summary>插件配置 conf（表单）</summary><div data-conf-form style="margin-top:8px"></div></details>`
+                : `<details><summary>插件配置 conf（YAML）</summary><textarea data-k="conf" spellcheck="false" style="margin-top:8px"></textarea></details>`)
+            : `<div class="hint">新插件的自定义配置 conf 需在保存构建、bot 生成 schema 之后才能编辑；此处仅设置公共配置。</div>`}
     <div class="row-actions">
-      <button class="primary" data-act="save">保存</button>
-      <span class="saved">已保存</span>
       ${builtin?'':'<button class="danger" data-act="del">删除</button>'}
+      ${builtin?'':'<button class="ghost" data-act="undel" style="display:none">撤销删除</button>'}
     </div>`;
     el.querySelector('.name').textContent = p.name;
     el.querySelector('[data-k=repo]').value = p.repo||'';
@@ -313,17 +376,17 @@
     el.querySelector('[data-k=exclude]').checked = !!p.exclude;
 
     let confGetter = null;
-    if(schema){
+    if(showConf && schema){
       const f = buildForm(schema, p.confValue||{});
       el.querySelector('[data-conf-form]').appendChild(f.el);
       confGetter = f.getValue;
-    } else {
-      el.querySelector('[data-k=conf]').value = p.confYaml||'';
     }
 
-    el.querySelector('[data-act=save]').onclick = async (ev)=>{
+    // el._getDTO collects this card's current values into a plugin DTO, matching
+    // the shape /api/config returns and PUT /api/plugins expects.
+    el._getDTO = function(){
       const dto = {
-        name:p.name,
+        name: p.name,
         repo: el.querySelector('[data-k=repo]').value.trim(),
         version: el.querySelector('[data-k=version]').value.trim(),
         seq: Number(el.querySelector('[data-k=seq]').value)||0,
@@ -331,23 +394,103 @@
         exclude: el.querySelector('[data-k=exclude]').checked,
         groups: parseGroups(el.querySelector('[data-k=groups]').value),
       };
-      if(confGetter){ dto.confValue = confGetter(); }
-      else { dto.confYaml = el.querySelector('[data-k=conf]').value; }
-      ev.target.disabled=true;
-      try{
-        await api('PUT','/api/plugins/'+encodeURIComponent(p.name), dto);
-        flash(el.querySelector('.saved'));
-        load();
-      }catch(e){ alert('保存失败：'+e.message); }
-      finally{ ev.target.disabled=false; }
+      if(showConf){
+        if(confGetter){ dto.confValue = confGetter(); }
+        else { const t = el.querySelector('[data-k=conf]'); if(t) dto.confYaml = t.value; }
+      }
+      return dto;
     };
-    const del = el.querySelector('[data-act=del]');
-    if(del) del.onclick = async ()=>{
-      if(!confirm('删除插件 '+p.name+' ？需重新构建后生效。')) return;
-      try{ await api('DELETE','/api/plugins/'+encodeURIComponent(p.name)); load(); }
-      catch(e){ alert('删除失败：'+e.message); }
+
+    // Any field edit re-evaluates the unsaved-changes bar.
+    el.addEventListener('input', refreshDirty);
+    el.addEventListener('change', refreshDirty);
+
+    const delBtn = el.querySelector('[data-act=del]');
+    const undelBtn = el.querySelector('[data-act=undel]');
+    const delTag = el.querySelector('.del-tag');
+    if(delBtn) delBtn.onclick = ()=>{
+      if(isNew){ el.remove(); refreshDirty(); return; } // never saved → just drop it
+      el._deleted = true;
+      el.classList.add('pending-del');
+      delTag.style.display='';
+      delBtn.style.display='none';
+      undelBtn.style.display='';
+      el.querySelectorAll('input,textarea').forEach(x=>x.disabled=true);
+      refreshDirty();
+    };
+    if(undelBtn) undelBtn.onclick = ()=>{
+      el._deleted = false;
+      el.classList.remove('pending-del');
+      delTag.style.display='none';
+      delBtn.style.display='';
+      undelBtn.style.display='none';
+      el.querySelectorAll('input,textarea').forEach(x=>x.disabled=false);
+      refreshDirty();
     };
     return el;
+  }
+
+  // ---- staged plugin changes: collect / diff / save / discard ----
+
+  // collectWork gathers every card that isn't marked for deletion, in DOM order.
+  function collectWork(){
+    const out = [];
+    $('#plugins').querySelectorAll('.card').forEach(el=>{
+      if(el._deleted) return;
+      out.push(el._getDTO());
+    });
+    return out;
+  }
+
+  // committedJSON is a snapshot of collectWork() taken right after each load(),
+  // so dirty detection compares like-for-like (same serializer) and never trips
+  // on server-vs-form formatting differences.
+  let committedJSON = '[]';
+
+  function pluginDiff(){
+    let committed = [];
+    try{ committed = JSON.parse(committedJSON); }catch(e){}
+    const byName = {};
+    committed.forEach(p=>{ byName[p.name] = JSON.stringify(p); });
+    let added=0, modified=0, removed=0;
+    $('#plugins').querySelectorAll('.card').forEach(el=>{
+      const dto = el._getDTO();
+      if(el._deleted){ if(dto.name in byName) removed++; return; }
+      if(!(dto.name in byName)) added++;
+      else if(JSON.stringify(dto) !== byName[dto.name]) modified++;
+    });
+    return {added, modified, removed, total: added+modified+removed};
+  }
+
+  function refreshDirty(){
+    const d = pluginDiff();
+    const bar = $('#pluginDirty');
+    if(d.total > 0){
+      $('#pluginDirtyText').textContent =
+        `有未保存的插件更改：新增 ${d.added}，修改 ${d.modified}，删除 ${d.removed}。保存后将统一构建并重启。`;
+      bar.classList.add('show');
+    } else {
+      bar.classList.remove('show');
+    }
+  }
+
+  async function savePlugins(btn){
+    if(btn) btn.disabled = true;
+    const ok = await runOp('保存插件更改并构建', ()=>
+      api('PUT','/api/plugins',{plugins: collectWork()}));
+    if(btn) btn.disabled = false;
+    if(ok){
+      // 成功：拉取（可能因重启而新生成的）schema 并以已提交状态重渲染。
+      await loadSchemas();
+      await load();
+    }
+    // 失败：服务器已把 plugins.yaml 回滚到旧配置，弹窗已显示构建错误。
+    // 这里特意不重载，保留用户的暂存更改，便于修正后重试。
+  }
+
+  function discardPlugins(){
+    if(pluginDiff().total>0 && !confirm('放弃所有未保存的插件更改？')) return;
+    load();
   }
 
   function flash(node){ node.classList.add('show'); setTimeout(()=>node.classList.remove('show'),1500); }
@@ -359,7 +502,11 @@
     try{ await loadDriver(); }catch(e){ /* config.json 可缺省 */ }
     const list = $('#plugins'); list.innerHTML='';
     (c.plugins||[]).sort((a,b)=>(a.seq-b.seq)||a.name.localeCompare(b.name))
-            .forEach(p=>list.appendChild(pluginCard(p)));
+            .forEach(p=>list.appendChild(pluginCard(p, {})));
+    // Snapshot the freshly rendered set as the committed baseline, then clear
+    // the unsaved-changes bar.
+    committedJSON = JSON.stringify(collectWork());
+    refreshDirty();
   }
 
   async function loadDriver(){
@@ -379,8 +526,8 @@
 
   async function saveDriver(btn){
     btn.disabled=true;
-    try{
-      await api('PUT','/api/driver',{
+    const ok = await runOp('保存驱动配置并构建', ()=>
+      api('PUT','/api/driver',{
         zero:{
           nickname: parseStrList($('#dNick').value),
           command_prefix: $('#dPrefix').value,
@@ -393,43 +540,50 @@
         },
         ws:{ url:$('#dWsUrl').value.trim(), token:$('#dWsToken').value },
         rws:{ url:$('#dRwsUrl').value.trim(), token:$('#dRwsToken').value },
-      });
-      flash(btn.parentNode.querySelector('.saved'));
-    }catch(e){ alert('保存失败：'+e.message); }
-    finally{ btn.disabled=false; }
+      }));
+    if(ok) flash(btn.parentNode.querySelector('.saved'));
+    btn.disabled=false;
   }
 
   async function saveGlobal(btn){
     btn.disabled=true;
-    try{
-      await api('PUT','/api/global',{
+    const ok = await runOp('保存全局设置并构建', ()=>
+      api('PUT','/api/global',{
         path:$('#gPath').value.trim(),
         groups:parseGroups($('#gGroups').value),
-        botName:parseStrList($('#gBotName').value),
-        superUsers:parseGroups($('#gSuper').value),
-      });
-      flash(btn.parentNode.querySelector('.saved'));
-    }catch(e){ alert('保存失败：'+e.message); }
-    finally{ btn.disabled=false; }
+      }));
+    if(ok) flash(btn.parentNode.querySelector('.saved'));
+    btn.disabled=false;
   }
 
-  async function addPlugin(btn){
+  // addPlugin stages a new plugin as a card in the list — no server call, no
+  // build. It becomes real when the user clicks 保存并构建. New plugins show only
+  // the common config (their conf schema doesn't exist until after a build).
+  function addPlugin(btn){
     const name=$('#nName').value.trim();
     if(!name){ alert('请填写插件名'); return; }
-    btn.disabled=true;
-    try{
-      await api('POST','/api/plugins',{name, repo:$('#nRepo').value.trim(), version:$('#nVer').value.trim()||'latest', seq:0});
-      $('#nName').value=$('#nRepo').value=$('#nVer').value='';
-      load();
-    }catch(e){ alert('添加失败：'+e.message); }
-    finally{ btn.disabled=false; }
+    let dup=false;
+    $('#plugins').querySelectorAll('.card').forEach(el=>{
+      if(!el._deleted && el._getDTO().name===name) dup=true;
+    });
+    if(dup){ alert('插件 '+name+' 已在列表中'); return; }
+    const p={ name, repo:$('#nRepo').value.trim(), version:$('#nVer').value.trim()||'latest',
+              seq:0, groups:[], disable:false, exclude:false };
+    const card=pluginCard(p, {isNew:true});
+    $('#plugins').appendChild(card);
+    $('#nName').value=$('#nRepo').value=$('#nVer').value='';
+    refreshDirty();
+    card.scrollIntoView({behavior:'smooth', block:'center'});
   }
 
+  const ACTION_TITLES = {rebuild:'重新构建并重启', restart:'重启 bot', start:'启动 bot', stop:'停止 bot'};
   async function action(kind,btn){
     btn.disabled=true;
-    try{ await api('POST','/api/actions/'+kind); }
-    catch(e){ alert('操作失败：'+e.message); }
-    finally{ setTimeout(()=>btn.disabled=false,400); }
+    try{
+      await runOp(ACTION_TITLES[kind]||kind, ()=> api('POST','/api/actions/'+kind));
+    } finally {
+      setTimeout(()=>btn.disabled=false,400);
+    }
   }
 
   function renderStatus(s){
@@ -442,25 +596,88 @@
     else if(s.needAction==='rebuild'){ b.textContent='插件清单已变化，需要「重新构建并重启」才会生效。'; b.className='banner show'; }
     else if(s.lastBuild==='failed'){ b.textContent='上次构建失败，请查看下方日志，bot 仍在用旧版本运行。'; b.className='banner show'; }
     else { b.className='banner'; }
-    if(s.botRunning && !lastRunning){ loadSchemas().then(load); }
+    if(s.botRunning && !lastRunning){ scheduleSchemaRefresh(); }
     lastRunning = s.botRunning;
   }
 
   function appendLog(e){
+    // "op" 流（构建输出、启停/重启进度）只进操作弹窗；
+    // "bot" 流（kohme 二进制自身输出）只进下方运行日志控制台。
+    if(e.stream==='op'){ appendOpLog(e); return; }
     const log=$('#log');
     const div=document.createElement('div');
     div.className='l';
-    div.innerHTML = `<span class="t">${e.time||''}</span><span class="${e.stream||''}"></span>`;
+    div.innerHTML = `<span class="t">${e.time||''}</span><span class="bot"></span>`;
     div.querySelector('span:last-child').textContent = e.line||'';
     log.appendChild(div);
     while(log.childNodes.length>1200) log.removeChild(log.firstChild);
     if($('#autoscroll').checked) log.scrollTop=log.scrollHeight;
   }
 
+  // ---- 操作弹窗：展示构建 / 重启等操作的实时输出 ----
+  let opActive = false;
+
+  function openOp(title){
+    opActive = true;
+    $('#opTitle').textContent = title;
+    $('#opLog').innerHTML = '';
+    $('#opState').textContent = '进行中…';
+    $('#opState').className = 'opstate running';
+    $('#opSpin').classList.remove('hide');
+    $('#opClose').disabled = true;
+    $('#opOverlay').classList.remove('hide');
+  }
+
+  function appendOpLog(e){
+    const log=$('#opLog');
+    const div=document.createElement('div');
+    div.className='l';
+    div.innerHTML = `<span class="t"></span><span class="line"></span>`;
+    div.querySelector('.t').textContent = e.time||'';
+    div.querySelector('.line').textContent = e.line||'';
+    log.appendChild(div);
+    while(log.childNodes.length>3000) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function finishOp(ok, msg){
+    opActive = false;
+    $('#opSpin').classList.add('hide');
+    $('#opClose').disabled = false;
+    $('#opState').textContent = msg || (ok?'完成':'失败');
+    $('#opState').className = 'opstate ' + (ok?'ok':'err');
+  }
+
+  function closeOp(){ if(opActive) return; $('#opOverlay').classList.add('hide'); }
+
+  // runOp 打开弹窗、执行 fn（一次会触发构建/重启的请求），
+  // 并把成功/失败结果落到弹窗上。构建输出经 SSE 的 "op" 流实时流入弹窗。
+  async function runOp(title, fn){
+    openOp(title);
+    try{
+      await fn();
+      finishOp(true, '完成');
+      return true;
+    }catch(e){
+      finishOp(false, e.message || '失败');
+      return false;
+    }
+  }
+
   window.schemas = {};
   async function loadSchemas(){
     try{ window.schemas = await api('GET','/api/schemas') || {}; }
     catch(e){ window.schemas = {}; }
+  }
+
+  // bot 重启后才会写出 .schemas.json，写文件相对状态变更有延迟，
+  // 因此分几次拉取，确保新插件的配置 schema 能被表单编辑器拾取到。
+  // 注意：若此刻列表里有未保存的暂存更改（新增/删除/修改），只刷新 schema、
+  // 不重渲染，以免把用户正在编辑的内容冲掉。
+  function scheduleSchemaRefresh(){
+    const refresh = ()=> loadSchemas().then(()=>{ if(pluginDiff().total===0) load(); });
+    setTimeout(refresh, 1000);
+    setTimeout(refresh, 3000);
   }
 
   // buildForm renders a form from a JSON Schema. Supports draft 2020-12

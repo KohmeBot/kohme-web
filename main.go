@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -30,6 +31,10 @@ var (
 	token       string
 	schemasPath string
 	authStore   *AuthStore
+
+	// opMu serializes any operation that mutates config and/or rebuilds, so a
+	// build, restart, add-plugin, save-config, etc. can never overlap.
+	opMu sync.Mutex
 )
 
 func main() {
@@ -64,7 +69,7 @@ func main() {
 	}
 	bin := *botBin
 	if bin == "" {
-		bin = "./kohme"
+		bin = DefaultBuildBin()
 	}
 	absBin := bin
 	if !filepath.IsAbs(absBin) {
@@ -97,9 +102,7 @@ func main() {
 	mux.HandleFunc("POST /api/logout", auth(handleLogout))
 	mux.HandleFunc("POST /api/auth/change", auth(handleChangePassword))
 	mux.HandleFunc("GET /api/config", auth(handleConfig))
-	mux.HandleFunc("POST /api/plugins", auth(handleAddPlugin))
-	mux.HandleFunc("PUT /api/plugins/{name}", auth(handleUpdatePlugin))
-	mux.HandleFunc("DELETE /api/plugins/{name}", auth(handleDeletePlugin))
+	mux.HandleFunc("PUT /api/plugins", auth(handlePluginsBulk))
 	mux.HandleFunc("PUT /api/global", auth(handleGlobal))
 	mux.HandleFunc("GET /api/driver", auth(handleDriverGet))
 	mux.HandleFunc("PUT /api/driver", auth(handleDriverPut))
@@ -290,85 +293,81 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleAddPlugin(w http.ResponseWriter, r *http.Request) {
-	var d pluginDTO
-	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+// mutatePluginsAndBuild applies a change to plugins.yaml, then synchronously
+// rebuilds and restarts the bot. The build output streams to the operation
+// popup via the "op" stream. If the build fails, the config change is rolled
+// back so a broken edit can never be left on disk, and the running bot (built
+// from the previous config) is left untouched.
+//
+// Validation errors returned by mutate (e.g. duplicate plugin name) abort
+// before any build happens and surface as a 400 to the browser.
+func mutatePluginsAndBuild(w http.ResponseWriter, mutate func(*Config) error) {
+	opMu.Lock()
+	defer opMu.Unlock()
+
+	prev, err := store.Load()
+	if err != nil {
 		httpErr(w, err)
 		return
 	}
-	d.Name = strings.TrimSpace(d.Name)
-	if d.Name == "" {
-		http.Error(w, "插件名不能为空", http.StatusBadRequest)
+	if err := store.Update(mutate); err != nil {
+		httpErr(w, err) // bad input / duplicate / not found — nothing built
 		return
 	}
-	conf, err := confFromDTO(d)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	err = store.Update(func(c *Config) error {
-		if _, ok := c.Plugins[d.Name]; ok {
-			return fmt.Errorf("插件 %s 已存在", d.Name)
+	if err := sup.BuildAndRestart(); err != nil {
+		if rbErr := store.Save(prev); rbErr != nil {
+			hub.log("op", "[配置回滚失败] "+rbErr.Error())
+		} else {
+			hub.log("op", "[已回滚本次配置更改]")
 		}
+		sup.publishStatus()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
 
-		c.Plugins[d.Name] = PluginEntry{
+// handlePluginsBulk replaces the entire plugin set in one request, then builds
+// and restarts exactly once. The UI batches any number of add / delete / edit
+// operations locally and commits them here together, so the bot is rebuilt a
+// single time instead of once per change. All the usual guarantees still hold:
+// bad input fails (400) before anything is written, and a failed build rolls
+// the whole plugins.yaml back to its previous contents.
+func handlePluginsBulk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Plugins []pluginDTO `json:"plugins"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpErr(w, err)
+		return
+	}
+	// Materialize the whole map up front so any validation error aborts before
+	// we touch disk or kick off a build.
+	next := make(map[string]PluginEntry, len(body.Plugins))
+	for _, d := range body.Plugins {
+		d.Name = strings.TrimSpace(d.Name)
+		if d.Name == "" {
+			http.Error(w, "插件名不能为空", http.StatusBadRequest)
+			return
+		}
+		if _, dup := next[d.Name]; dup {
+			http.Error(w, "插件名重复: "+d.Name, http.StatusBadRequest)
+			return
+		}
+		cv, err := confFromDTO(d)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("插件 %s 的 conf 非法: %v", d.Name, err), http.StatusBadRequest)
+			return
+		}
+		next[d.Name] = PluginEntry{
 			Repo: d.Repo, Version: d.Version, Seq: d.Seq,
-			Exclude: d.Exclude, Disable: d.Disable, Groups: d.Groups, Conf: conf,
+			Exclude: d.Exclude, Disable: d.Disable, Groups: d.Groups, Conf: cv,
 		}
+	}
+	mutatePluginsAndBuild(w, func(c *Config) error {
+		c.Plugins = next
 		return nil
 	})
-	if err != nil {
-		httpErr(w, err)
-		return
-	}
-	sup.publishStatus()
-	writeJSON(w, map[string]any{"ok": true})
-}
-
-func handleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	var d pluginDTO
-	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
-		httpErr(w, err)
-		return
-	}
-	conf, err := confFromDTO(d)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	err = store.Update(func(c *Config) error {
-		p, ok := c.Plugins[name]
-		if !ok {
-			return fmt.Errorf("插件 %s 不存在", name)
-		}
-		p.Repo, p.Version, p.Seq = d.Repo, d.Version, d.Seq
-		p.Exclude, p.Disable, p.Groups, p.Conf = d.Exclude, d.Disable, d.Groups, conf
-		return nil
-	})
-	if err != nil {
-		httpErr(w, err)
-		return
-	}
-	sup.publishStatus()
-	writeJSON(w, map[string]any{"ok": true})
-}
-
-func handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	err := store.Update(func(c *Config) error {
-		if _, ok := c.Plugins[name]; !ok {
-			return fmt.Errorf("插件 %s 不存在", name)
-		}
-		delete(c.Plugins, name)
-		return nil
-	})
-	if err != nil {
-		httpErr(w, err)
-		return
-	}
-	sup.publishStatus()
-	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleGlobal(w http.ResponseWriter, r *http.Request) {
@@ -380,16 +379,11 @@ func handleGlobal(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, err)
 		return
 	}
-	err := store.Update(func(c *Config) error {
+	mutatePluginsAndBuild(w, func(c *Config) error {
 		c.Path = body.Path
 		c.Groups = body.Groups
 		return nil
 	})
-	if err != nil {
-		httpErr(w, err)
-		return
-	}
-	writeJSON(w, map[string]any{"ok": true})
 }
 
 // ---- driver config (config.json) ----
@@ -403,14 +397,29 @@ func handleDriverGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, d)
 }
 
+// handleDriverPut writes config.json then rebuilds and restarts. config.json is
+// read by the bot at startup, so a restart is required to apply it; the rebuild
+// keeps the apply path identical to every other config save. On build failure
+// the driver config is rolled back and the running bot is left untouched.
 func handleDriverPut(w http.ResponseWriter, r *http.Request) {
 	var d driverDTO
 	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
 		httpErr(w, err)
 		return
 	}
+	opMu.Lock()
+	defer opMu.Unlock()
+
+	prev, _ := driverStore.Load()
 	if err := driverStore.Save(d); err != nil {
 		httpErr(w, err)
+		return
+	}
+	if err := sup.BuildAndRestart(); err != nil {
+		_ = driverStore.Save(prev)
+		hub.log("op", "[已回滚驱动配置更改]")
+		sup.publishStatus()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
@@ -433,11 +442,18 @@ func handleSchemas(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRebuild(w http.ResponseWriter, r *http.Request) {
-	sup.Rebuild()
+	opMu.Lock()
+	defer opMu.Unlock()
+	if err := sup.BuildAndRestart(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true})
 }
 
 func handleRestart(w http.ResponseWriter, r *http.Request) {
+	opMu.Lock()
+	defer opMu.Unlock()
 	if err := sup.RestartBot(); err != nil {
 		httpErr(w, err)
 		return
@@ -446,6 +462,8 @@ func handleRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStart(w http.ResponseWriter, r *http.Request) {
+	opMu.Lock()
+	defer opMu.Unlock()
 	if err := sup.StartBot(); err != nil {
 		httpErr(w, err)
 		return
@@ -454,6 +472,8 @@ func handleStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStop(w http.ResponseWriter, r *http.Request) {
+	opMu.Lock()
+	defer opMu.Unlock()
 	sup.StopBot()
 	writeJSON(w, map[string]any{"ok": true})
 }

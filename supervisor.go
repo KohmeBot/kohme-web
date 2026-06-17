@@ -14,6 +14,13 @@ import (
 )
 
 // Event is what gets pushed to the browser over SSE.
+//
+// Stream conventions:
+//   - "bot": the bot binary's own stdout/stderr. These are the only log lines
+//     shown in the page's bottom console and replayed to new tabs.
+//   - "op":  build output plus lifecycle/progress messages (start/stop/restart,
+//     build began/succeeded/failed). These drive the operation popup, not the
+//     bottom console.
 type Event struct {
 	Type   string  `json:"type"` // "log" | "status"
 	Stream string  `json:"stream,omitempty"`
@@ -31,8 +38,9 @@ type Status struct {
 }
 
 // Hub is a tiny fan-out broadcaster with a replay buffer for new subscribers.
-// Every log line is also mirrored to `mirror` (the admin's own stdout) so the
-// running bot's output is visible in the terminal and the browser at once.
+// Only "bot" log lines are kept in the replay ring (so a freshly opened tab
+// sees the recent bot console, not stale build output). Every log line is
+// mirrored to `mirror` (the admin's own stdout) regardless of stream.
 type Hub struct {
 	mu     sync.Mutex
 	subs   map[chan Event]struct{}
@@ -47,7 +55,7 @@ func NewHub() *Hub {
 func (h *Hub) Subscribe() (chan Event, func()) {
 	ch := make(chan Event, 256)
 	h.mu.Lock()
-	for _, e := range h.ring { // replay recent history
+	for _, e := range h.ring { // replay recent bot history
 		select {
 		case ch <- e:
 		default:
@@ -67,9 +75,11 @@ func (h *Hub) Publish(e Event) {
 	e.Time = time.Now().Format("15:04:05")
 	h.mu.Lock()
 	if e.Type == "log" {
-		h.ring = append(h.ring, e)
-		if len(h.ring) > 400 {
-			h.ring = h.ring[len(h.ring)-400:]
+		if e.Stream == "bot" { // only bot output is replayed to new subscribers
+			h.ring = append(h.ring, e)
+			if len(h.ring) > 400 {
+				h.ring = h.ring[len(h.ring)-400:]
+			}
 		}
 		if h.mirror != nil {
 			fmt.Fprintf(h.mirror, "%s [%s] %s\n", e.Time, e.Stream, e.Line)
@@ -170,10 +180,10 @@ func (s *Supervisor) StartBot() error {
 			s.cmd = nil
 		}
 		s.mu.Unlock()
-		s.hub.log("bot", "[bot 进程已退出]")
+		s.hub.log("op", "[bot 进程已退出]")
 		s.publishStatus()
 	}()
-	s.hub.log("bot", "[bot 已启动]")
+	s.hub.log("op", "[bot 已启动]")
 	go s.publishStatus()
 	return nil
 }
@@ -182,7 +192,7 @@ func (s *Supervisor) stopBotLocked() {
 	if s.cmd == nil || s.cmd.Process == nil {
 		return
 	}
-	s.hub.log("bot", "[正在停止 bot ...]")
+	s.hub.log("op", "[正在停止 bot ...]")
 	_ = s.cmd.Process.Signal(os.Interrupt)
 	done := make(chan struct{})
 	cmd := s.cmd
@@ -211,64 +221,74 @@ func (s *Supervisor) RestartBot() error {
 	return s.StartBot()
 }
 
-// Rebuild runs the build script, and on success restarts the bot. It streams
-// every line of build output to the browser and never swaps a broken build:
-// if the build fails the running bot is left untouched.
-func (s *Supervisor) Rebuild() {
+// BuildAndRestart runs the build script synchronously, streaming every line of
+// build output to the "op" stream (the operation popup), and on success
+// restarts the bot. It returns an error if the build (or the subsequent
+// restart) fails. A broken build never swaps the running bot: on failure the
+// currently running bot is left untouched.
+//
+// Unlike the old fire-and-forget Rebuild, this blocks until the build (and
+// restart) finish, so the HTTP handler that triggered it can report the final
+// outcome to the browser.
+func (s *Supervisor) BuildAndRestart() error {
 	s.mu.Lock()
 	if s.building {
 		s.mu.Unlock()
-		s.hub.log("build", "[已有构建在进行中]")
-		return
+		s.hub.log("op", "[已有构建在进行中]")
+		return fmt.Errorf("已有构建在进行中")
 	}
 	s.building = true
 	s.lastBuild = ""
 	s.mu.Unlock()
 	s.publishStatus()
 
-	go func() {
-		ok := s.runBuild()
-		s.mu.Lock()
-		s.building = false
-		if ok {
-			s.lastBuild = "ok"
-			if c, err := s.store.Load(); err == nil {
-				s.builtSig = buildSignature(c)
-			}
-		} else {
-			s.lastBuild = "failed"
-		}
-		s.mu.Unlock()
+	ok := s.runBuild()
 
-		if ok {
-			s.hub.log("build", "[构建成功，正在重启 bot]")
-			if err := s.RestartBot(); err != nil {
-				s.hub.log("build", "[重启失败] "+err.Error())
-			}
-		} else {
-			s.hub.log("build", "[构建失败，保持原 bot 不变]")
+	s.mu.Lock()
+	s.building = false
+	if ok {
+		s.lastBuild = "ok"
+		if c, err := s.store.Load(); err == nil {
+			s.builtSig = buildSignature(c)
 		}
+	} else {
+		s.lastBuild = "failed"
+	}
+	s.mu.Unlock()
+
+	if !ok {
+		s.hub.log("op", "[构建失败，保持原 bot 不变]")
 		s.publishStatus()
-	}()
+		return fmt.Errorf("构建失败，请查看构建输出")
+	}
+
+	s.hub.log("op", "[构建成功，正在重启 bot]")
+	if err := s.RestartBot(); err != nil {
+		s.hub.log("op", "[重启失败] "+err.Error())
+		s.publishStatus()
+		return err
+	}
+	s.publishStatus()
+	return nil
 }
 
 func (s *Supervisor) runBuild() bool {
-	s.hub.log("build", "[开始构建] "+fmtCmd(s.buildCmd)+"  (cwd: "+s.repoDir+")")
+	s.hub.log("op", "[开始构建] "+fmtCmd(s.buildCmd)+"  (cwd: "+s.repoDir+")")
 	cmd := exec.Command(s.buildCmd[0], s.buildCmd[1:]...)
 	cmd.Dir = s.repoDir
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
-		s.hub.log("build", "[无法启动构建] "+err.Error())
+		s.hub.log("op", "[无法启动构建] "+err.Error())
 		return false
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); s.scan("build", stdout) }()
-	go func() { defer wg.Done(); s.scan("build", stderr) }()
+	go func() { defer wg.Done(); s.scan("op", stdout) }()
+	go func() { defer wg.Done(); s.scan("op", stderr) }()
 	wg.Wait()
 	if err := cmd.Wait(); err != nil {
-		s.hub.log("build", "[构建退出] "+err.Error())
+		s.hub.log("op", "[构建退出] "+err.Error())
 		return false
 	}
 	return true
@@ -301,6 +321,14 @@ func DefaultBuildCmd() []string {
 		return []string{"cmd", "/c", "build.bat"}
 	}
 	return []string{"sh", "build.sh"}
+}
+
+// DefaultBuildBin
+func DefaultBuildBin() string {
+	if runtime.GOOS == "windows" {
+		return "./kohme.exe"
+	}
+	return "./kohme"
 }
 
 func jsonBytes(v any) []byte {
