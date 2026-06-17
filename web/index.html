@@ -1,114 +1,123 @@
 <!doctype html>
 <html lang="zh">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kohme 管理后台</title>
-<style>
-  :root{
-    --bg:#f6f6f4; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6b66;
-    --line:#e3e3df; --accent:#5b53c4; --accent-soft:#eceaf9;
-    --ok:#1d7a52; --warn:#9a6a12; --warn-soft:#f7eeda; --danger:#a8362f;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
-  }
-  @media (prefers-color-scheme:dark){
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kohme 管理后台</title>
+  <style>
     :root{
-      --bg:#16161a; --panel:#1f1f25; --ink:#e7e7e3; --muted:#9b9b94;
-      --line:#33333b; --accent:#a79df0; --accent-soft:#262335;
-      --ok:#5dcaa5; --warn:#e0a13a; --warn-soft:#332b18; --danger:#e0726a;
+      --bg:#f6f6f4; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6b66;
+      --line:#e3e3df; --accent:#5b53c4; --accent-soft:#eceaf9;
+      --ok:#1d7a52; --warn:#9a6a12; --warn-soft:#f7eeda; --danger:#a8362f;
+      --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      --sans:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
     }
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
-    font-size:15px;line-height:1.55;padding-bottom:230px}
-  a{color:var(--accent)}
-  h1{font-size:18px;font-weight:600;margin:0}
-  h2{font-size:14px;font-weight:600;margin:0 0 10px;color:var(--muted);
-    text-transform:uppercase;letter-spacing:.06em}
-  .wrap{max-width:920px;margin:0 auto;padding:20px 18px}
-  header{position:sticky;top:0;z-index:5;background:var(--bg);
-    border-bottom:1px solid var(--line)}
-  .bar{max-width:920px;margin:0 auto;padding:12px 18px;display:flex;
-    align-items:center;gap:14px;flex-wrap:wrap}
-  .pill{display:inline-flex;align-items:center;gap:7px;font-size:13px;
-    padding:4px 11px;border-radius:999px;border:1px solid var(--line);
-    background:var(--panel);font-weight:500}
-  .dot{width:8px;height:8px;border-radius:50%}
-  .dot.run{background:var(--ok)} .dot.stop{background:var(--muted)}
-  .dot.build{background:var(--warn);animation:pulse 1s ease-in-out infinite}
-  @media (prefers-reduced-motion:reduce){.dot.build{animation:none}}
-  @keyframes pulse{50%{opacity:.35}}
-  .spacer{flex:1}
-  button{font-family:inherit;font-size:14px;cursor:pointer;border-radius:8px;
-    border:1px solid var(--line);background:var(--panel);color:var(--ink);
-    padding:7px 13px;font-weight:500}
-  button:hover{border-color:var(--accent)}
-  button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  button.ghost{background:transparent}
-  button.danger{color:var(--danger);border-color:transparent}
-  button.danger:hover{border-color:var(--danger)}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  .banner{background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);
-    padding:9px 14px;border-radius:9px;margin:14px 0;font-size:14px;display:none}
-  .banner.show{display:block}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    padding:16px;margin-bottom:12px}
-  .card .top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-  .name{font-weight:600;font-size:16px}
-  .tag{font-size:12px;padding:2px 8px;border-radius:6px;background:var(--accent-soft);
-    color:var(--accent);font-weight:500}
-  .tag.off{background:transparent;color:var(--muted);border:1px solid var(--line)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-    gap:10px 14px;margin-top:10px}
-  label.f{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
-  input[type=text],input[type=number],input[type=password],textarea{
-    width:100%;font-family:inherit;font-size:14px;color:var(--ink);
-    background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 9px}
-  input.mono,textarea{font-family:var(--mono);font-size:13px}
-  textarea{resize:vertical;min-height:90px;line-height:1.5}
-  input:focus,textarea:focus{outline:none;border-color:var(--accent)}
-  .toggles{display:flex;gap:18px;margin-top:12px;flex-wrap:wrap}
-  .sw{display:inline-flex;align-items:center;gap:7px;font-size:14px;cursor:pointer}
-  .sw input{width:34px;height:19px;appearance:none;background:var(--line);
-    border-radius:999px;position:relative;cursor:pointer;transition:background .15s}
-  .sw input:checked{background:var(--accent)}
-  .sw input::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
-    border-radius:50%;background:#fff;transition:transform .15s}
-  .sw input:checked::after{transform:translateX(15px)}
-  details{margin-top:12px}
-  summary{cursor:pointer;font-size:13px;color:var(--muted);user-select:none}
-  .row-actions{display:flex;gap:8px;margin-top:14px;align-items:center}
-  .saved{font-size:13px;color:var(--ok);opacity:0;transition:opacity .2s}
-  .saved.show{opacity:1}
-  .console{position:fixed;left:0;right:0;bottom:0;height:220px;background:#0e0e12;
-    border-top:1px solid #2a2a32;display:flex;flex-direction:column}
-  .console .chead{display:flex;align-items:center;gap:12px;padding:6px 16px;
-    border-bottom:1px solid #2a2a32;color:#bcbcc4;font-size:13px}
-  .console .chead button{background:transparent;border-color:#33333b;color:#bcbcc4;
-    padding:3px 9px;font-size:12px}
-  .log{flex:1;overflow:auto;padding:8px 16px;font-family:var(--mono);font-size:12.5px;
-    line-height:1.55;color:#cfcfd6}
-  .log .l{white-space:pre-wrap;word-break:break-word}
-  .log .build{color:#9ec5ff} .log .bot{color:#a9e6c0} .log .t{color:#6b6b78;margin-right:8px}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;
-    align-items:center;justify-content:center;z-index:20}
-  .login{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-    padding:26px;width:340px;max-width:90vw}
-  .hide{display:none}
-  .hint{font-size:12.5px;color:var(--muted);margin-top:4px}
-</style>
+    @media (prefers-color-scheme:dark){
+      :root{
+        --bg:#16161a; --panel:#1f1f25; --ink:#e7e7e3; --muted:#9b9b94;
+        --line:#33333b; --accent:#a79df0; --accent-soft:#262335;
+        --ok:#5dcaa5; --warn:#e0a13a; --warn-soft:#332b18; --danger:#e0726a;
+      }
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+      font-size:15px;line-height:1.55;padding-bottom:230px}
+    a{color:var(--accent)}
+    h1{font-size:18px;font-weight:600;margin:0}
+    h2{font-size:14px;font-weight:600;margin:0 0 10px;color:var(--muted);
+      text-transform:uppercase;letter-spacing:.06em}
+    .wrap{max-width:920px;margin:0 auto;padding:20px 18px}
+    header{position:sticky;top:0;z-index:5;background:var(--bg);
+      border-bottom:1px solid var(--line)}
+    .bar{max-width:920px;margin:0 auto;padding:12px 18px;display:flex;
+      align-items:center;gap:14px;flex-wrap:wrap}
+    .pill{display:inline-flex;align-items:center;gap:7px;font-size:13px;
+      padding:4px 11px;border-radius:999px;border:1px solid var(--line);
+      background:var(--panel);font-weight:500}
+    .dot{width:8px;height:8px;border-radius:50%}
+    .dot.run{background:var(--ok)} .dot.stop{background:var(--muted)}
+    .dot.build{background:var(--warn);animation:pulse 1s ease-in-out infinite}
+    @media (prefers-reduced-motion:reduce){.dot.build{animation:none}}
+    @keyframes pulse{50%{opacity:.35}}
+    .spacer{flex:1}
+    button{font-family:inherit;font-size:14px;cursor:pointer;border-radius:8px;
+      border:1px solid var(--line);background:var(--panel);color:var(--ink);
+      padding:7px 13px;font-weight:500}
+    button:hover{border-color:var(--accent)}
+    button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+    button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+    button.ghost{background:transparent}
+    button.danger{color:var(--danger);border-color:transparent}
+    button.danger:hover{border-color:var(--danger)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .banner{background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);
+      padding:9px 14px;border-radius:9px;margin:14px 0;font-size:14px;display:none}
+    .banner.show{display:block}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+      padding:16px;margin-bottom:12px}
+    .card .top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+    .name{font-weight:600;font-size:16px}
+    .tag{font-size:12px;padding:2px 8px;border-radius:6px;background:var(--accent-soft);
+      color:var(--accent);font-weight:500}
+    .tag.off{background:transparent;color:var(--muted);border:1px solid var(--line)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:10px 14px;margin-top:10px}
+    label.f{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+    input[type=text],input[type=number],input[type=password],textarea{
+      width:100%;font-family:inherit;font-size:14px;color:var(--ink);
+      background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 9px}
+    input.mono,textarea{font-family:var(--mono);font-size:13px}
+    textarea{resize:vertical;min-height:90px;line-height:1.5}
+    input:focus,textarea:focus{outline:none;border-color:var(--accent)}
+    .toggles{display:flex;gap:18px;margin-top:12px;flex-wrap:wrap}
+    .sw{display:inline-flex;align-items:center;gap:7px;font-size:14px;cursor:pointer}
+    .sw input{width:34px;height:19px;appearance:none;background:var(--line);
+      border-radius:999px;position:relative;cursor:pointer;transition:background .15s}
+    .sw input:checked{background:var(--accent)}
+    .sw input::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
+      border-radius:50%;background:#fff;transition:transform .15s}
+    .sw input:checked::after{transform:translateX(15px)}
+    details{margin-top:12px}
+    summary{cursor:pointer;font-size:13px;color:var(--muted);user-select:none}
+    .row-actions{display:flex;gap:8px;margin-top:14px;align-items:center}
+    .saved{font-size:13px;color:var(--ok);opacity:0;transition:opacity .2s}
+    .saved.show{opacity:1}
+    .console{position:fixed;left:0;right:0;bottom:0;height:220px;background:#0e0e12;
+      border-top:1px solid #2a2a32;display:flex;flex-direction:column}
+    .console .chead{display:flex;align-items:center;gap:12px;padding:6px 16px;
+      border-bottom:1px solid #2a2a32;color:#bcbcc4;font-size:13px}
+    .console .chead button{background:transparent;border-color:#33333b;color:#bcbcc4;
+      padding:3px 9px;font-size:12px}
+    .log{flex:1;overflow:auto;padding:8px 16px;font-family:var(--mono);font-size:12.5px;
+      line-height:1.55;color:#cfcfd6}
+    .log .l{white-space:pre-wrap;word-break:break-word}
+    .log .build{color:#9ec5ff} .log .bot{color:#a9e6c0} .log .t{color:#6b6b78;margin-right:8px}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;
+      align-items:center;justify-content:center;z-index:20}
+    .login{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+      padding:26px;width:340px;max-width:90vw}
+    .hide{display:none}
+    .hint{font-size:12.5px;color:var(--muted);margin-top:4px}
+  </style>
 </head>
 <body>
 
 <div id="overlay" class="overlay hide">
   <div class="login">
-    <h1 style="margin-bottom:14px">登录</h1>
-    <label class="f">口令（启动后台时终端会打印）</label>
-    <input id="tok" type="password" autocomplete="off">
-    <div id="loginErr" class="hint" style="color:var(--danger)"></div>
-    <button class="primary" style="margin-top:14px;width:100%" onclick="login()">进入</button>
+    <h1 id="authTitle" style="margin-bottom:6px">登录</h1>
+    <div id="authHint" class="hint" style="margin-bottom:14px"></div>
+
+    <div id="setupToken" class="hide">
+      <label class="f">初始化口令（后台启动时终端会打印）</label>
+      <input id="aTok" type="password" autocomplete="off">
+    </div>
+    <label class="f" style="margin-top:8px">账号</label>
+    <input id="aUser" type="text" autocomplete="username">
+    <label class="f" style="margin-top:8px">密码</label>
+    <input id="aPass" type="password" autocomplete="current-password">
+
+    <div id="authErr" class="hint" style="color:var(--danger);margin-top:6px"></div>
+    <button id="authBtn" class="primary" style="margin-top:14px;width:100%" onclick="submitAuth()">进入</button>
   </div>
 </div>
 
@@ -121,6 +130,11 @@
     <button onclick="action('restart',this)">仅重启</button>
     <button id="btnStart" onclick="action('start',this)">启动</button>
     <button class="ghost" onclick="action('stop',this)">停止</button>
+    <span id="acct" class="hide" style="display:inline-flex;gap:10px;align-items:center;margin-left:6px">
+      <span id="acctName" class="hint"></span>
+      <button class="ghost" onclick="openChangePw()">修改密码</button>
+      <button class="ghost" onclick="logout()">退出</button>
+    </span>
   </div>
 </header>
 
@@ -130,11 +144,37 @@
   <h2>全局设置</h2>
   <div class="card">
     <div class="grid">
+      <div><label class="f">全局启用的群 groups（逗号分隔）</label><input id="gGroups" type="text" class="mono"></div>
       <div><label class="f">插件配置目录 path</label><input id="gPath" type="text" class="mono"></div>
-      <div><label class="f">全局启用的群（逗号分隔）</label><input id="gGroups" type="text" class="mono"></div>
     </div>
     <div class="row-actions">
       <button class="primary" onclick="saveGlobal(this)">保存全局设置</button>
+      <span class="saved">已保存</span>
+    </div>
+  </div>
+
+  <h2 style="margin-top:24px">驱动配置 (config.json · ZeroBot)</h2>
+  <div class="card">
+    <div class="grid">
+      <div><label class="f">机器人名 nickname（逗号分隔）</label><input id="dNick" type="text"></div>
+      <div><label class="f">命令前缀 command_prefix</label><input id="dPrefix" type="text"></div>
+      <div><label class="f">超级用户 super_users（逗号分隔）</label><input id="dSuper" type="text" class="mono"></div>
+      <div><label class="f">事件环长度 ring_len（0 关闭）</label><input id="dRing" type="number"></div>
+      <div><label class="f">事件延迟 latency（time.Duration·纳秒）</label><input id="dLatency" type="number"></div>
+      <div><label class="f">最大处理时间 max_process_time（纳秒，默认 4 分钟）</label><input id="dMaxProc" type="number"></div>
+    </div>
+    <div class="toggles">
+      <label class="sw"><input id="dMark" type="checkbox">自动标记消息已读 mark_message</label>
+      <label class="sw"><input id="dKeep" type="checkbox">保留 at me 原始消息 keep_at_me_message</label>
+    </div>
+    <div class="grid" style="margin-top:12px">
+      <div><label class="f">正向 WS 地址 ws.url</label><input id="dWsUrl" type="text" class="mono"></div>
+      <div><label class="f">正向 WS Token ws.token</label><input id="dWsToken" type="text" class="mono"></div>
+      <div><label class="f">反向 WS 地址 rws.url（不用留空）</label><input id="dRwsUrl" type="text" class="mono"></div>
+      <div><label class="f">反向 WS Token rws.token</label><input id="dRwsToken" type="text" class="mono"></div>
+    </div>
+    <div class="row-actions">
+      <button class="primary" onclick="saveDriver(this)">保存驱动配置</button>
       <span class="saved">已保存</span>
     </div>
   </div>
@@ -165,37 +205,81 @@
 </div>
 
 <script>
-const $ = s => document.querySelector(s);
-let es = null;
+  const $ = s => document.querySelector(s);
+  let es = null;
 
-async function api(method, path, body){
-  const opt = {method, credentials:'include', headers:{}};
-  if(body!==undefined){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
-  const r = await fetch(path, opt);
-  if(r.status===401){ showLogin(); throw new Error('未授权'); }
-  if(!r.ok){ throw new Error(await r.text()); }
-  const ct = r.headers.get('content-type')||'';
-  return ct.includes('json') ? r.json() : r.text();
-}
+  async function api(method, path, body){
+    const opt = {method, credentials:'include', headers:{}};
+    if(body!==undefined){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+    const r = await fetch(path, opt);
+    if(r.status===401){ showLogin(); throw new Error('未授权'); }
+    if(!r.ok){ throw new Error(await r.text()); }
+    const ct = r.headers.get('content-type')||'';
+    return ct.includes('json') ? r.json() : r.text();
+  }
 
-function showLogin(){ $('#overlay').classList.remove('hide'); }
-async function login(){
-  try{
-    await api('POST','/api/login',{token:$('#tok').value});
-    $('#overlay').classList.add('hide');
-    boot();
-  }catch(e){ $('#loginErr').textContent = '口令错误，请重试'; }
-}
+  async function rawPost(path, body){
+    const r = await fetch(path,{method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ throw new Error((await r.text()).trim()||('HTTP '+r.status)); }
+    return r.json().catch(()=>({}));
+  }
 
-function parseGroups(s){
-  return (s||'').split(/[,\s]+/).map(x=>x.trim()).filter(Boolean).map(Number).filter(n=>!isNaN(n));
-}
+  let authConfigured = true;
+  async function showAuth(){
+    try{ authConfigured = !!(await fetch('/api/auth/state').then(r=>r.json())).configured; }
+    catch(e){ authConfigured = true; }
+    const setup = !authConfigured;
+    $('#authTitle').textContent = setup ? '首次设置账户' : '登录';
+    $('#authHint').textContent = setup ? '还没有账户。用后台启动时终端打印的初始化口令，创建你的账号和密码。' : '';
+    $('#setupToken').classList.toggle('hide', !setup);
+    $('#authBtn').textContent = setup ? '创建账户并进入' : '进入';
+    $('#authErr').textContent = '';
+    $('#overlay').classList.remove('hide');
+    (setup ? $('#aTok') : $('#aUser')).focus();
+  }
+  function showLogin(){ showAuth(); }
 
-function pluginCard(p){
-  const el = document.createElement('div');
-  el.className='card';
-  const builtin = !p.repo;
-  el.innerHTML = `
+  async function submitAuth(){
+    const user=$('#aUser').value.trim(), pass=$('#aPass').value;
+    $('#authErr').textContent='';
+    try{
+      if(!authConfigured){
+        await rawPost('/api/auth/setup',{token:$('#aTok').value, username:user, password:pass});
+      } else {
+        await rawPost('/api/login',{username:user, password:pass});
+      }
+      $('#overlay').classList.add('hide');
+      $('#aPass').value='';
+      boot();
+    }catch(e){ $('#authErr').textContent = e.message || '失败，请重试'; }
+  }
+
+  async function logout(){
+    try{ await rawPost('/api/logout',{}); }catch(e){}
+    location.reload();
+  }
+
+  async function openChangePw(){
+    const oldp = prompt('当前密码'); if(oldp===null) return;
+    const newp = prompt('新密码'); if(newp===null || newp==='') return;
+    try{ await rawPost('/api/auth/change',{oldPassword:oldp, newPassword:newp}); alert('密码已修改，下次登录请用新密码。'); }
+    catch(e){ alert('修改失败：'+e.message); }
+  }
+
+  function parseGroups(s){
+    return (s||'').split(/[,\s]+/).map(x=>x.trim()).filter(Boolean).map(Number).filter(n=>!isNaN(n));
+  }
+  function parseStrList(s){
+    return (s||'').split(/[,\n]/).map(x=>x.trim().replace(/^["']|["']$/g,'')).filter(Boolean);
+  }
+
+  function pluginCard(p){
+    const el = document.createElement('div');
+    el.className='card';
+    const builtin = p.name=='core';
+    const schema = (window.schemas||{})[p.name];
+    el.innerHTML = `
     <div class="top">
       <span class="name"></span>
       <span class="tag ${p.disable?'off':''}">${p.disable?'功能已禁用':'已启用'}</span>
@@ -212,134 +296,340 @@ function pluginCard(p){
       <label class="sw"><input data-k="disable" type="checkbox">禁用功能（仍编译加载）</label>
       <label class="sw"><input data-k="exclude" type="checkbox">排除（不编译进 bot）</label>
     </div>
-    <details>
-      <summary>插件配置 conf（YAML）</summary>
-      <textarea data-k="conf" spellcheck="false" style="margin-top:8px"></textarea>
-    </details>
+    ${schema
+            ? `<details open><summary>插件配置 conf（表单）</summary><div data-conf-form style="margin-top:8px"></div></details>`
+            : `<details><summary>插件配置 conf（YAML）</summary><textarea data-k="conf" spellcheck="false" style="margin-top:8px"></textarea></details>`}
     <div class="row-actions">
       <button class="primary" data-act="save">保存</button>
       <span class="saved">已保存</span>
       ${builtin?'':'<button class="danger" data-act="del">删除</button>'}
     </div>`;
-  el.querySelector('.name').textContent = p.name;
-  el.querySelector('[data-k=repo]').value = p.repo||'';
-  el.querySelector('[data-k=version]').value = p.version||'';
-  el.querySelector('[data-k=seq]').value = p.seq||0;
-  el.querySelector('[data-k=groups]').value = (p.groups||[]).join(', ');
-  el.querySelector('[data-k=disable]').checked = !!p.disable;
-  el.querySelector('[data-k=exclude]').checked = !!p.exclude;
-  el.querySelector('[data-k=conf]').value = p.confYaml||'';
+    el.querySelector('.name').textContent = p.name;
+    el.querySelector('[data-k=repo]').value = p.repo||'';
+    el.querySelector('[data-k=version]').value = p.version||'';
+    el.querySelector('[data-k=seq]').value = p.seq||0;
+    el.querySelector('[data-k=groups]').value = (p.groups||[]).join(', ');
+    el.querySelector('[data-k=disable]').checked = !!p.disable;
+    el.querySelector('[data-k=exclude]').checked = !!p.exclude;
 
-  el.querySelector('[data-act=save]').onclick = async (ev)=>{
-    const dto = {
-      name:p.name,
-      repo: el.querySelector('[data-k=repo]').value.trim(),
-      version: el.querySelector('[data-k=version]').value.trim(),
-      seq: Number(el.querySelector('[data-k=seq]').value)||0,
-      disable: el.querySelector('[data-k=disable]').checked,
-      exclude: el.querySelector('[data-k=exclude]').checked,
-      groups: parseGroups(el.querySelector('[data-k=groups]').value),
-      confYaml: el.querySelector('[data-k=conf]').value,
+    let confGetter = null;
+    if(schema){
+      const f = buildForm(schema, p.confValue||{});
+      el.querySelector('[data-conf-form]').appendChild(f.el);
+      confGetter = f.getValue;
+    } else {
+      el.querySelector('[data-k=conf]').value = p.confYaml||'';
+    }
+
+    el.querySelector('[data-act=save]').onclick = async (ev)=>{
+      const dto = {
+        name:p.name,
+        repo: el.querySelector('[data-k=repo]').value.trim(),
+        version: el.querySelector('[data-k=version]').value.trim(),
+        seq: Number(el.querySelector('[data-k=seq]').value)||0,
+        disable: el.querySelector('[data-k=disable]').checked,
+        exclude: el.querySelector('[data-k=exclude]').checked,
+        groups: parseGroups(el.querySelector('[data-k=groups]').value),
+      };
+      if(confGetter){ dto.confValue = confGetter(); }
+      else { dto.confYaml = el.querySelector('[data-k=conf]').value; }
+      ev.target.disabled=true;
+      try{
+        await api('PUT','/api/plugins/'+encodeURIComponent(p.name), dto);
+        flash(el.querySelector('.saved'));
+        load();
+      }catch(e){ alert('保存失败：'+e.message); }
+      finally{ ev.target.disabled=false; }
     };
-    ev.target.disabled=true;
+    const del = el.querySelector('[data-act=del]');
+    if(del) del.onclick = async ()=>{
+      if(!confirm('删除插件 '+p.name+' ？需重新构建后生效。')) return;
+      try{ await api('DELETE','/api/plugins/'+encodeURIComponent(p.name)); load(); }
+      catch(e){ alert('删除失败：'+e.message); }
+    };
+    return el;
+  }
+
+  function flash(node){ node.classList.add('show'); setTimeout(()=>node.classList.remove('show'),1500); }
+
+  async function load(){
+    const c = await api('GET','/api/config');
+    $('#gPath').value = c.path||'';
+    $('#gGroups').value = (c.groups||[]).join(', ');
+    try{ await loadDriver(); }catch(e){ /* config.json 可缺省 */ }
+    const list = $('#plugins'); list.innerHTML='';
+    (c.plugins||[]).sort((a,b)=>(a.seq-b.seq)||a.name.localeCompare(b.name))
+            .forEach(p=>list.appendChild(pluginCard(p)));
+  }
+
+  async function loadDriver(){
+    const d = await api('GET','/api/driver');
+    const z = d.zero||{}, ws=d.ws||{}, rws=d.rws||{};
+    $('#dNick').value = (z.nickname||[]).join(', ');
+    $('#dPrefix').value = z.command_prefix||'';
+    $('#dSuper').value = (z.super_users||[]).join(', ');
+    $('#dRing').value = z.ring_len||0;
+    $('#dLatency').value = z.latency||0;
+    $('#dMaxProc').value = z.max_process_time||0;
+    $('#dMark').checked = !!z.mark_message;
+    $('#dKeep').checked = !!z.keep_at_me_message;
+    $('#dWsUrl').value = ws.url||''; $('#dWsToken').value = ws.token||'';
+    $('#dRwsUrl').value = rws.url||''; $('#dRwsToken').value = rws.token||'';
+  }
+
+  async function saveDriver(btn){
+    btn.disabled=true;
     try{
-      await api('PUT','/api/plugins/'+encodeURIComponent(p.name), dto);
-      flash(el.querySelector('.saved'));
-      load();
+      await api('PUT','/api/driver',{
+        zero:{
+          nickname: parseStrList($('#dNick').value),
+          command_prefix: $('#dPrefix').value,
+          super_users: parseGroups($('#dSuper').value),
+          ring_len: Number($('#dRing').value)||0,
+          latency: Number($('#dLatency').value)||0,
+          max_process_time: Number($('#dMaxProc').value)||0,
+          mark_message: $('#dMark').checked,
+          keep_at_me_message: $('#dKeep').checked,
+        },
+        ws:{ url:$('#dWsUrl').value.trim(), token:$('#dWsToken').value },
+        rws:{ url:$('#dRwsUrl').value.trim(), token:$('#dRwsToken').value },
+      });
+      flash(btn.parentNode.querySelector('.saved'));
     }catch(e){ alert('保存失败：'+e.message); }
-    finally{ ev.target.disabled=false; }
-  };
-  const del = el.querySelector('[data-act=del]');
-  if(del) del.onclick = async ()=>{
-    if(!confirm('删除插件 '+p.name+' ？需重新构建后生效。')) return;
-    try{ await api('DELETE','/api/plugins/'+encodeURIComponent(p.name)); load(); }
-    catch(e){ alert('删除失败：'+e.message); }
-  };
-  return el;
-}
+    finally{ btn.disabled=false; }
+  }
 
-function flash(node){ node.classList.add('show'); setTimeout(()=>node.classList.remove('show'),1500); }
+  async function saveGlobal(btn){
+    btn.disabled=true;
+    try{
+      await api('PUT','/api/global',{
+        path:$('#gPath').value.trim(),
+        groups:parseGroups($('#gGroups').value),
+        botName:parseStrList($('#gBotName').value),
+        superUsers:parseGroups($('#gSuper').value),
+      });
+      flash(btn.parentNode.querySelector('.saved'));
+    }catch(e){ alert('保存失败：'+e.message); }
+    finally{ btn.disabled=false; }
+  }
 
-async function load(){
-  const c = await api('GET','/api/config');
-  $('#gPath').value = c.path||'';
-  $('#gGroups').value = (c.groups||[]).join(', ');
-  const list = $('#plugins'); list.innerHTML='';
-  (c.plugins||[]).sort((a,b)=>(a.seq-b.seq)||a.name.localeCompare(b.name))
-    .forEach(p=>list.appendChild(pluginCard(p)));
-}
+  async function addPlugin(btn){
+    const name=$('#nName').value.trim();
+    if(!name){ alert('请填写插件名'); return; }
+    btn.disabled=true;
+    try{
+      await api('POST','/api/plugins',{name, repo:$('#nRepo').value.trim(), version:$('#nVer').value.trim()||'latest', seq:0});
+      $('#nName').value=$('#nRepo').value=$('#nVer').value='';
+      load();
+    }catch(e){ alert('添加失败：'+e.message); }
+    finally{ btn.disabled=false; }
+  }
 
-async function saveGlobal(btn){
-  btn.disabled=true;
-  try{
-    await api('PUT','/api/global',{path:$('#gPath').value.trim(),groups:parseGroups($('#gGroups').value)});
-    flash(btn.parentNode.querySelector('.saved'));
-  }catch(e){ alert('保存失败：'+e.message); }
-  finally{ btn.disabled=false; }
-}
+  async function action(kind,btn){
+    btn.disabled=true;
+    try{ await api('POST','/api/actions/'+kind); }
+    catch(e){ alert('操作失败：'+e.message); }
+    finally{ setTimeout(()=>btn.disabled=false,400); }
+  }
 
-async function addPlugin(btn){
-  const name=$('#nName').value.trim();
-  if(!name){ alert('请填写插件名'); return; }
-  btn.disabled=true;
-  try{
-    await api('POST','/api/plugins',{name, repo:$('#nRepo').value.trim(), version:$('#nVer').value.trim()||'latest', seq:0});
-    $('#nName').value=$('#nRepo').value=$('#nVer').value='';
-    load();
-  }catch(e){ alert('添加失败：'+e.message); }
-  finally{ btn.disabled=false; }
-}
+  function renderStatus(s){
+    const pill=$('#statusPill'), text=$('#statusText'), dot=pill.querySelector('.dot');
+    dot.className='dot ' + (s.building?'build':(s.botRunning?'run':'stop'));
+    text.textContent = s.building?'正在构建…':(s.botRunning?'bot 运行中':'bot 已停止');
+    $('#btnRebuild').disabled = s.building;
+    const b=$('#banner');
+    if(s.building){ b.className='banner'; }
+    else if(s.needAction==='rebuild'){ b.textContent='插件清单已变化，需要「重新构建并重启」才会生效。'; b.className='banner show'; }
+    else if(s.lastBuild==='failed'){ b.textContent='上次构建失败，请查看下方日志，bot 仍在用旧版本运行。'; b.className='banner show'; }
+    else { b.className='banner'; }
+    if(s.botRunning && !lastRunning){ loadSchemas().then(load); }
+    lastRunning = s.botRunning;
+  }
 
-async function action(kind,btn){
-  btn.disabled=true;
-  try{ await api('POST','/api/actions/'+kind); }
-  catch(e){ alert('操作失败：'+e.message); }
-  finally{ setTimeout(()=>btn.disabled=false,400); }
-}
+  function appendLog(e){
+    const log=$('#log');
+    const div=document.createElement('div');
+    div.className='l';
+    div.innerHTML = `<span class="t">${e.time||''}</span><span class="${e.stream||''}"></span>`;
+    div.querySelector('span:last-child').textContent = e.line||'';
+    log.appendChild(div);
+    while(log.childNodes.length>1200) log.removeChild(log.firstChild);
+    if($('#autoscroll').checked) log.scrollTop=log.scrollHeight;
+  }
 
-function renderStatus(s){
-  const pill=$('#statusPill'), text=$('#statusText'), dot=pill.querySelector('.dot');
-  dot.className='dot ' + (s.building?'build':(s.botRunning?'run':'stop'));
-  text.textContent = s.building?'正在构建…':(s.botRunning?'bot 运行中':'bot 已停止');
-  $('#btnRebuild').disabled = s.building;
-  const b=$('#banner');
-  if(s.building){ b.className='banner'; }
-  else if(s.needAction==='rebuild'){ b.textContent='插件清单已变化，需要「重新构建并重启」才会生效。'; b.className='banner show'; }
-  else if(s.lastBuild==='failed'){ b.textContent='上次构建失败，请查看下方日志，bot 仍在用旧版本运行。'; b.className='banner show'; }
-  else { b.className='banner'; }
-}
+  window.schemas = {};
+  async function loadSchemas(){
+    try{ window.schemas = await api('GET','/api/schemas') || {}; }
+    catch(e){ window.schemas = {}; }
+  }
 
-function appendLog(e){
-  const log=$('#log');
-  const div=document.createElement('div');
-  div.className='l';
-  div.innerHTML = `<span class="t">${e.time||''}</span><span class="${e.stream||''}"></span>`;
-  div.querySelector('span:last-child').textContent = e.line||'';
-  log.appendChild(div);
-  while(log.childNodes.length>1200) log.removeChild(log.firstChild);
-  if($('#autoscroll').checked) log.scrollTop=log.scrollHeight;
-}
+  // buildForm renders a form from a JSON Schema. Supports draft 2020-12
+  // $ref / $defs (what invopop/jsonschema emits): the root may be just
+  // {$ref, $defs}; nested structs and array items are $refs too. Handles nested
+  // objects (recursively), string/integer/number/boolean, string enum, and
+  // arrays of scalars. Anything it can't model (free-form object, array of
+  // objects, oneOf, ...) falls back to a JSON textarea so data is never lost.
+  function resolveSchema(node, root){
+    let n = node || {};
+    let guard = 0;
+    while(n && n.$ref && guard++ < 50){
+      const ref = n.$ref;
+      let name = null, bag = null;
+      if(ref.indexOf('#/$defs/')===0){ name=ref.slice(8); bag=(root&&root.$defs)||{}; }
+      else if(ref.indexOf('#/definitions/')===0){ name=ref.slice(14); bag=(root&&root.definitions)||{}; }
+      else break;
+      n = bag[name] || {};
+    }
+    return n || {};
+  }
 
-function connect(){
-  es = new EventSource('/api/stream', {withCredentials:true});
-  es.onmessage = ev=>{
-    const e = JSON.parse(ev.data);
-    if(e.type==='status') renderStatus(e.status);
-    else if(e.type==='log') appendLog(e);
-  };
-  es.onerror = ()=>{ /* EventSource 会自动重连 */ };
-}
+  function schemaType(s){
+    let t = s.type;
+    if(Array.isArray(t)) t = t.find(x=>x!=='null') || t[0];
+    if(!t){ if(s.properties) t='object'; else if(s.enum) t='string'; }
+    return t;
+  }
 
-async function boot(){
-  try{ await load(); }
-  catch(e){ if(e.message==='未授权'){ return; } }
-  if(!es) connect();
-}
+  function coerceEnum(v, enumArr){ for(const e of enumArr){ if(String(e)===v) return e; } return v; }
 
-// 先探测是否已登录
-fetch('/api/config',{credentials:'include'}).then(r=>{
-  if(r.status===401){ showLogin(); } else { boot(); }
-}).catch(()=>showLogin());
+  function jsonArea(cur){
+    const ta = document.createElement('textarea');
+    ta.spellcheck = false;
+    ta.value = (cur!==undefined && cur!==null) ? JSON.stringify(cur, null, 2) : '';
+    const get = ()=>{ const t=ta.value.trim(); if(!t) return null; try{ return JSON.parse(t); }catch(e){ return ta.value; } };
+    return { input: ta, get };
+  }
+
+  function renderScalarField(key, s, cur, rawProp, root){
+    const field = document.createElement('div');
+    const label = document.createElement('label');
+    label.className = 'f';
+    const desc = s.description || (rawProp && rawProp.description);
+    label.textContent = (s.title || (rawProp && rawProp.title) || key) + (desc ? (' — ' + desc) : '');
+    field.appendChild(label);
+    const t = schemaType(s);
+    let input, get;
+    if(Array.isArray(s.enum)){
+      input = document.createElement('select');
+      s.enum.forEach(opt=>{ const o=document.createElement('option'); o.value=String(opt); o.textContent=String(opt); input.appendChild(o); });
+      input.value = String(cur!==undefined ? cur : (s.default!==undefined ? s.default : s.enum[0]));
+      get = ()=> coerceEnum(input.value, s.enum);
+    } else if(t==='boolean'){
+      const sw = document.createElement('label'); sw.className='sw';
+      input = document.createElement('input'); input.type='checkbox';
+      input.checked = cur!==undefined ? !!cur : !!s.default;
+      sw.appendChild(input); field.appendChild(sw);
+      get = ()=> input.checked;
+    } else if(t==='integer' || t==='number'){
+      input = document.createElement('input'); input.type='number';
+      if(t==='number') input.step='any';
+      input.value = (cur!==undefined && cur!==null) ? cur : (s.default!==undefined ? s.default : '');
+      get = ()=> input.value==='' ? null : (t==='integer' ? parseInt(input.value,10) : parseFloat(input.value));
+    } else if(t==='array'){
+      const items = resolveSchema(s.items || {}, root);
+      const it = schemaType(items);
+      if(it==='object' || it==='array'){
+        const a = jsonArea(cur); input=a.input; input.className='mono'; get=a.get;
+      } else {
+        input = document.createElement('input'); input.type='text'; input.className='mono';
+        input.placeholder = '逗号分隔';
+        input.value = Array.isArray(cur) ? cur.join(', ') : '';
+        get = ()=> input.value.split(/[,\n]/).map(x=>x.trim()).filter(Boolean)
+                .map(x=> it==='integer' ? parseInt(x,10) : it==='number' ? parseFloat(x) : x);
+      }
+    } else if(t==='object'){
+      const a = jsonArea(cur); input=a.input; input.className='mono'; get=a.get;
+    } else {
+      input = document.createElement('input'); input.type='text';
+      input.value = (cur!==undefined && cur!==null) ? cur : (s.default!==undefined ? s.default : '');
+      get = ()=> input.value;
+    }
+    if(t!=='boolean') field.appendChild(input);
+    return { el: field, get };
+  }
+
+  function buildObjectForm(objSchema, value, root, depth){
+    value = value || {};
+    const wrap = document.createElement('div');
+    wrap.className = 'grid';
+    const props = objSchema.properties || {};
+    let order = Object.keys(props);
+    if(Array.isArray(objSchema.required)){
+      const req = objSchema.required.filter(k=>props[k]);
+      order = req.concat(order.filter(k=> req.indexOf(k)<0));
+    }
+    const getters = [];
+    for(const key of order){
+      const raw = props[key];
+      const s = resolveSchema(raw, root);
+      const cur = value[key];
+      const t = schemaType(s);
+      if(t==='object' && s.properties){
+        const group = document.createElement('div');
+        group.style.gridColumn = '1 / -1';
+        const title = document.createElement('div');
+        title.className = 'f'; title.style.fontWeight = '600'; title.style.marginBottom = '6px';
+        title.textContent = (s.title || (raw && raw.title) || key);
+        group.appendChild(title);
+        const box = document.createElement('div');
+        box.style.borderLeft = '2px solid var(--line)'; box.style.paddingLeft = '12px';
+        const sub = buildObjectForm(s, cur || {}, root, depth+1);
+        box.appendChild(sub.el); group.appendChild(box);
+        wrap.appendChild(group);
+        getters.push([key, sub.getValue]);
+        continue;
+      }
+      const f = renderScalarField(key, s, cur, raw, root);
+      wrap.appendChild(f.el);
+      getters.push([key, f.get]);
+    }
+    return {
+      el: wrap,
+      getValue: ()=>{
+        const o = {};
+        for(const [k,g] of getters){
+          const v = g();
+          if(v==='' || v===null || v===undefined) continue;
+          if(Array.isArray(v) && v.length===0) continue;
+          if(typeof v==='object' && !Array.isArray(v) && Object.keys(v).length===0) continue;
+          o[k]=v;
+        }
+        return o;
+      }
+    };
+  }
+
+  function buildForm(schema, value){
+    const root = schema || {};
+    const top = resolveSchema(root, root);
+    return buildObjectForm(top, value || {}, root, 0);
+  }
+
+  function connect(){
+    es = new EventSource('/api/stream', {withCredentials:true});
+    es.onmessage = ev=>{
+      const e = JSON.parse(ev.data);
+      if(e.type==='status') renderStatus(e.status);
+      else if(e.type==='log') appendLog(e);
+    };
+    es.onerror = ()=>{ /* EventSource 会自动重连 */ };
+  }
+
+  let lastRunning = false;
+  async function boot(){
+    try{ await loadSchemas(); await load(); }
+    catch(e){ if(e.message==='未授权'){ return; } }
+    try{
+      const st = await fetch('/api/auth/state',{credentials:'include'}).then(r=>r.json());
+      if(st.username){ $('#acctName').textContent = st.username; $('#acct').classList.remove('hide'); }
+    }catch(e){}
+    if(!es) connect();
+  }
+
+  // 先探测是否已登录
+  fetch('/api/config',{credentials:'include'}).then(r=>{
+    if(r.status===401){ showLogin(); } else { boot(); }
+  }).catch(()=>showLogin());
 </script>
 </body>
 </html>

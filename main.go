@@ -15,16 +15,21 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed web
 var webFS embed.FS
 
 var (
-	store *ConfigStore
-	sup   *Supervisor
-	hub   *Hub
-	token string
+	store       *ConfigStore
+	driverStore *DriverStore
+	sup         *Supervisor
+	hub         *Hub
+	token       string
+	schemasPath string
+	authStore   *AuthStore
 )
 
 func main() {
@@ -32,10 +37,14 @@ func main() {
 		addr       = flag.String("addr", "127.0.0.1:8787", "监听地址。默认只听本机，切勿直接暴露公网")
 		repoDir    = flag.String("repo", ".", "kohme 仓库根目录")
 		pluginsRel = flag.String("plugins", "conf/plugins.yaml", "plugins.yaml 相对仓库根目录的路径")
-		botBin     = flag.String("bin", "", "构建产出的 bot 二进制路径（相对仓库根目录），如 ./bot 或 ./kohme")
+		configRel  = flag.String("config", "conf/config.json", "config.json（ZeroBot 驱动配置）相对仓库根目录的路径")
+		botBin     = flag.String("bin", "", "构建产出的 bot 二进制路径（相对仓库根目录）。kohme 的 build.sh 产出 ./kohme，默认即此")
 		botArgs    = flag.String("bot-args", "", "传给 bot 的额外参数，空格分隔")
 		buildStr   = flag.String("build", "", "构建命令，默认 linux/mac 用 build.sh、windows 用 build.bat")
-		tok        = flag.String("token", "", "登录口令。留空则自动随机生成并打印到终端")
+		tok        = flag.String("token", "", "首次初始化账户用的一次性口令。留空则自动随机生成并打印到终端")
+		authPath   = flag.String("auth", "kadmin-auth.json", "存放账户密码（已加盐哈希）的文件路径")
+		resetAuth  = flag.Bool("reset-auth", false, "清除已设置的账户，重新走首次初始化流程")
+		autostart  = flag.Bool("autostart", true, "启动后台时若已有 bot 二进制则自动拉起 bot")
 	)
 	flag.Parse()
 
@@ -47,6 +56,7 @@ func main() {
 	if _, err := os.Stat(pluginsPath); err != nil {
 		log.Fatalf("找不到 %s ：请用 -repo 指向 kohme 仓库根目录，或用 -plugins 指定路径", pluginsPath)
 	}
+	schemasPath = filepath.Join(filepath.Dir(pluginsPath), ".schemas.json")
 
 	buildCmd := DefaultBuildCmd()
 	if strings.TrimSpace(*buildStr) != "" {
@@ -54,7 +64,7 @@ func main() {
 	}
 	bin := *botBin
 	if bin == "" {
-		bin = "./bot"
+		bin = "./kohme"
 	}
 	absBin := bin
 	if !filepath.IsAbs(absBin) {
@@ -66,18 +76,35 @@ func main() {
 		token = randToken()
 	}
 
+	authStore = NewAuthStore(*authPath)
+	if *resetAuth {
+		if err := authStore.Reset(); err != nil {
+			log.Printf("重置账户失败: %v", err)
+		} else {
+			log.Println("已清除账户，将重新进行首次初始化")
+		}
+	}
+
 	hub = NewHub()
 	store = NewConfigStore(pluginsPath)
+	driverStore = NewDriverStore(filepath.Join(absRepo, *configRel))
 	sup = NewSupervisor(absRepo, buildCmd, absBin, splitArgs(*botArgs), hub, store)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/auth/state", handleAuthState)
+	mux.HandleFunc("POST /api/auth/setup", handleSetup)
 	mux.HandleFunc("POST /api/login", handleLogin)
+	mux.HandleFunc("POST /api/logout", auth(handleLogout))
+	mux.HandleFunc("POST /api/auth/change", auth(handleChangePassword))
 	mux.HandleFunc("GET /api/config", auth(handleConfig))
 	mux.HandleFunc("POST /api/plugins", auth(handleAddPlugin))
 	mux.HandleFunc("PUT /api/plugins/{name}", auth(handleUpdatePlugin))
 	mux.HandleFunc("DELETE /api/plugins/{name}", auth(handleDeletePlugin))
 	mux.HandleFunc("PUT /api/global", auth(handleGlobal))
+	mux.HandleFunc("GET /api/driver", auth(handleDriverGet))
+	mux.HandleFunc("PUT /api/driver", auth(handleDriverPut))
 	mux.HandleFunc("GET /api/status", auth(handleStatus))
+	mux.HandleFunc("GET /api/schemas", auth(handleSchemas))
 	mux.HandleFunc("POST /api/actions/rebuild", auth(handleRebuild))
 	mux.HandleFunc("POST /api/actions/restart", auth(handleRestart))
 	mux.HandleFunc("POST /api/actions/start", auth(handleStart))
@@ -94,8 +121,18 @@ func main() {
 	fmt.Printf("  配置:   %s\n", pluginsPath)
 	fmt.Printf("  构建:   %s\n", fmtCmd(buildCmd))
 	fmt.Printf("  bot:    %s\n", absBin)
-	fmt.Printf("  口令:   %s\n", token)
+	if authStore.Configured() {
+		fmt.Printf("  登录:   使用账户密码（账户: %s）。忘记密码用 -reset-auth 重置\n", authStore.Username())
+	} else {
+		fmt.Printf("  初始化: 首次打开网页用此一次性口令创建账户密码: %s\n", token)
+	}
 	fmt.Println("──────────────────────────────────────────────")
+
+	if *autostart {
+		if err := sup.StartBot(); err != nil {
+			log.Printf("自动启动 bot 跳过：%v（构建一次后即可运行）", err)
+		}
+	}
 
 	log.Fatal(http.ListenAndServe(*addr, mux))
 }
@@ -113,43 +150,121 @@ func auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func authorized(r *http.Request) bool {
-	if c, err := r.Cookie("kadmin"); err == nil {
-		if subtle.ConstantTimeCompare([]byte(c.Value), []byte(token)) == 1 {
-			return true
-		}
+	c, err := r.Cookie("kadmin")
+	if err != nil {
+		return false
 	}
-	h := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return subtle.ConstantTimeCompare([]byte(h), []byte(token)) == 1
+	return authStore.ValidSession(c.Value)
 }
 
-func handleLogin(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Token string `json:"token"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if subtle.ConstantTimeCompare([]byte(body.Token), []byte(token)) != 1 {
-		http.Error(w, "口令错误", http.StatusUnauthorized)
-		return
-	}
+func setSession(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name: "kadmin", Value: token, Path: "/",
+		Name: "kadmin", Value: authStore.NewSession(), Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(30 * 24 * time.Hour),
 	})
+}
+
+// handleAuthState tells the UI whether an account exists yet, so it can show
+// either the first-run setup form or the normal login form.
+func handleAuthState(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"configured": authStore.Configured(),
+		"username":   authStore.Username(),
+	})
+}
+
+// handleSetup runs once: the operator uses the startup token to create the
+// account and password. Refused if an account already exists.
+func handleSetup(w http.ResponseWriter, r *http.Request) {
+	if authStore.Configured() {
+		http.Error(w, "账户已存在，请直接登录", http.StatusConflict)
+		return
+	}
+	var body struct{ Token, Username, Password string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if subtle.ConstantTimeCompare([]byte(body.Token), []byte(token)) != 1 {
+		http.Error(w, "初始化口令错误（见后台启动时的终端输出）", http.StatusUnauthorized)
+		return
+	}
+	if err := authStore.SetCredentials(strings.TrimSpace(body.Username), body.Password); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	setSession(w)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !authStore.Configured() {
+		http.Error(w, "尚未初始化账户", http.StatusConflict)
+		return
+	}
+	var body struct{ Username, Password string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if !authStore.Verify(strings.TrimSpace(body.Username), body.Password) {
+		http.Error(w, "账号或密码错误", http.StatusUnauthorized)
+		return
+	}
+	setSession(w)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie("kadmin"); err == nil {
+		authStore.DropSession(c.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: "kadmin", Value: "", Path: "/", MaxAge: -1})
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct{ OldPassword, NewPassword string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if err := authStore.ChangePassword(body.OldPassword, body.NewPassword); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true})
 }
 
 // ---- config API ----
 
 type pluginDTO struct {
-	Name     string  `json:"name"`
-	Repo     string  `json:"repo"`
-	Version  string  `json:"version"`
-	Seq      int     `json:"seq"`
-	Exclude  bool    `json:"exclude"`
-	Disable  bool    `json:"disable"`
-	Groups   []int64 `json:"groups"`
-	ConfYAML string  `json:"confYaml"`
+	Name      string          `json:"name"`
+	Repo      string          `json:"repo"`
+	Version   string          `json:"version"`
+	Seq       int64           `json:"seq"`
+	Exclude   bool            `json:"exclude"`
+	Disable   bool            `json:"disable"`
+	Groups    []int64         `json:"groups"`
+	ConfYAML  string          `json:"confYaml"`
+	ConfValue json.RawMessage `json:"confValue,omitempty"`
+}
+
+// confFromDTO builds the conf node from a structured form value when present,
+// otherwise from the raw-YAML editor text.
+func confFromDTO(d pluginDTO) (map[string]any, error) {
+	if len(d.ConfValue) > 0 && string(d.ConfValue) != "null" {
+		var v map[string]any
+		if err := json.Unmarshal(d.ConfValue, &v); err != nil {
+			return nil, fmt.Errorf("conf 表单数据非法: %w", err)
+		}
+		return v, nil
+	}
+
+	var n yaml.Node
+	n, err := yamlToConf(d.ConfYAML)
+	if err != nil {
+		return nil, err
+	}
+
+	var v map[string]any
+	if err := n.Decode(&v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
 }
 
 func handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -160,14 +275,16 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	plugins := make([]pluginDTO, 0, len(c.Plugins))
 	for name, p := range c.Plugins {
+		cv, _ := json.Marshal(confToValue(p.Conf))
 		plugins = append(plugins, pluginDTO{
 			Name: name, Repo: p.Repo, Version: p.Version, Seq: p.Seq,
 			Exclude: p.Exclude, Disable: p.Disable, Groups: p.Groups,
-			ConfYAML: confToYAML(p.Conf),
+			ConfYAML: confToYAML(p.Conf), ConfValue: cv,
 		})
 	}
 	writeJSON(w, map[string]any{
-		"path":    c.Path,
+		"path": c.Path,
+
 		"groups":  c.Groups,
 		"plugins": plugins,
 	})
@@ -184,7 +301,7 @@ func handleAddPlugin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "插件名不能为空", http.StatusBadRequest)
 		return
 	}
-	conf, err := yamlToConf(d.ConfYAML)
+	conf, err := confFromDTO(d)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -193,7 +310,8 @@ func handleAddPlugin(w http.ResponseWriter, r *http.Request) {
 		if _, ok := c.Plugins[d.Name]; ok {
 			return fmt.Errorf("插件 %s 已存在", d.Name)
 		}
-		c.Plugins[d.Name] = &PluginEntry{
+
+		c.Plugins[d.Name] = PluginEntry{
 			Repo: d.Repo, Version: d.Version, Seq: d.Seq,
 			Exclude: d.Exclude, Disable: d.Disable, Groups: d.Groups, Conf: conf,
 		}
@@ -214,7 +332,7 @@ func handleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, err)
 		return
 	}
-	conf, err := yamlToConf(d.ConfYAML)
+	conf, err := confFromDTO(d)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -274,9 +392,45 @@ func handleGlobal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// ---- driver config (config.json) ----
+
+func handleDriverGet(w http.ResponseWriter, r *http.Request) {
+	d, err := driverStore.Load()
+	if err != nil {
+		httpErr(w, err)
+		return
+	}
+	writeJSON(w, d)
+}
+
+func handleDriverPut(w http.ResponseWriter, r *http.Request) {
+	var d driverDTO
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		httpErr(w, err)
+		return
+	}
+	if err := driverStore.Save(d); err != nil {
+		httpErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 // ---- actions ----
 
 func handleStatus(w http.ResponseWriter, r *http.Request) { writeJSON(w, sup.Status()) }
+
+// handleSchemas serves the .schemas.json the bot writes at startup. Missing
+// file just means no plugin declared a schema yet — return an empty object.
+func handleSchemas(w http.ResponseWriter, r *http.Request) {
+	b, err := os.ReadFile(schemasPath)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil || len(b) == 0 {
+		_, _ = w.Write([]byte("{}"))
+		return
+	}
+	_, _ = w.Write(b)
+}
 
 func handleRebuild(w http.ResponseWriter, r *http.Request) {
 	sup.Rebuild()

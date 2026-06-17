@@ -31,13 +31,18 @@ type Status struct {
 }
 
 // Hub is a tiny fan-out broadcaster with a replay buffer for new subscribers.
+// Every log line is also mirrored to `mirror` (the admin's own stdout) so the
+// running bot's output is visible in the terminal and the browser at once.
 type Hub struct {
-	mu   sync.Mutex
-	subs map[chan Event]struct{}
-	ring []Event
+	mu     sync.Mutex
+	subs   map[chan Event]struct{}
+	ring   []Event
+	mirror io.Writer
 }
 
-func NewHub() *Hub { return &Hub{subs: map[chan Event]struct{}{}} }
+func NewHub() *Hub {
+	return &Hub{subs: map[chan Event]struct{}{}, mirror: os.Stdout}
+}
 
 func (h *Hub) Subscribe() (chan Event, func()) {
 	ch := make(chan Event, 256)
@@ -65,6 +70,9 @@ func (h *Hub) Publish(e Event) {
 		h.ring = append(h.ring, e)
 		if len(h.ring) > 400 {
 			h.ring = h.ring[len(h.ring)-400:]
+		}
+		if h.mirror != nil {
+			fmt.Fprintf(h.mirror, "%s [%s] %s\n", e.Time, e.Stream, e.Line)
 		}
 	}
 	for ch := range h.subs {

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/kohmebot/kohme/pkg/conf"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,22 +18,10 @@ import (
 // PluginEntry mirrors one entry under `plugins:` in plugins.yaml.
 // Conf is kept as a raw YAML node so the plugin's own config block
 // round-trips with its key order and inline comments intact.
-type PluginEntry struct {
-	Repo    string    `yaml:"repo,omitempty"`
-	Version string    `yaml:"version,omitempty"`
-	Seq     int       `yaml:"seq"`
-	Exclude bool      `yaml:"exclude,omitempty"`
-	Disable bool      `yaml:"disable,omitempty"`
-	Groups  []int64   `yaml:"groups,omitempty"`
-	Conf    yaml.Node `yaml:"conf,omitempty"`
-}
+type PluginEntry = conf.CustomPluginConf
 
 // Config mirrors the top level of plugins.yaml.
-type Config struct {
-	Path    string                  `yaml:"path,omitempty"`
-	Groups  []int64                 `yaml:"groups"`
-	Plugins map[string]*PluginEntry `yaml:"plugins"`
-}
+type Config conf.PluginConf
 
 // ConfigStore guards concurrent access to the on-disk plugins.yaml.
 type ConfigStore struct {
@@ -60,7 +49,7 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析 plugins.yaml 失败: %w", err)
 	}
 	if c.Plugins == nil {
-		c.Plugins = map[string]*PluginEntry{}
+		c.Plugins = map[string]PluginEntry{}
 	}
 	return &c, nil
 }
@@ -150,15 +139,17 @@ func pruneBackups(path string, keep int) {
 	}
 }
 
-// confToYAML renders a plugin's conf node back to a YAML string for the editor.
-func confToYAML(n yaml.Node) string {
-	if n.Kind == 0 {
+// confToYAML renders a plugin's conf value back to a YAML string for the editor.
+func confToYAML(v map[string]any) string {
+	if len(v) == 0 {
 		return ""
 	}
-	b, err := yaml.Marshal(&n)
+
+	b, err := yaml.Marshal(v)
 	if err != nil {
 		return ""
 	}
+
 	return string(b)
 }
 
@@ -176,6 +167,14 @@ func yamlToConf(text string) (yaml.Node, error) {
 		return *doc.Content[0], nil
 	}
 	return doc, nil
+}
+
+// confToValue returns the plain Go value, for JSON / form use.
+func confToValue(v map[string]any) any {
+	if len(v) == 0 {
+		return nil
+	}
+	return v
 }
 
 // buildSignature hashes only the fields that change which code is compiled in
