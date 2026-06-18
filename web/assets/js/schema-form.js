@@ -1,7 +1,7 @@
 // schema-form.js — 从 JSON Schema 渲染表单。
 // 支持 invopop/jsonschema 产出的 draft 2020-12 的 $ref/$defs：根可能是 {$ref,$defs}，
-// 嵌套结构体与数组项也是 $ref。处理嵌套对象（递归）、string/integer/number/boolean、
-// string 枚举。数组：标量数组（[]string/[]int64/[]number）默认用标签编辑器（回车添加、
+// 嵌套结构体与数组项也是 $ref。处理嵌套对象（递归）、map[K]V（object+additionalProperties，
+// 键值行编辑器）、string/integer/number/boolean、string 枚举。数组：标量数组（[]string/[]int64/[]number）默认用标签编辑器（回车添加、
 // × 删除）；对象数组（[]struct）用可增删的行编辑器，每项是子表单；数组套数组回退 JSON
 // 文本域。无法建模的（自由对象 / oneOf …）也回退 JSON，保证数据不丢。纯函数模块，仅依赖 dom。
 //
@@ -137,13 +137,70 @@ function objectArrayField(itemSchema, cur, root, depth) {
   return { el: wrap, get };
 }
 
+// map[K]V：JSON Schema 里是 object + additionalProperties(值的 schema)、且无固定 properties。
+function hasProps(s) { return s.properties && Object.keys(s.properties).length > 0; }
+function isMap(s) {
+  return schemaType(s) === 'object' && !hasProps(s)
+    && s.additionalProperties && typeof s.additionalProperties === 'object';
+}
+
+// map 键值编辑器：每行一个键输入 + 一个值控件（值是对象就用子表单，否则用标量控件），可增删。
+function mapField(valueSchema, cur, root, depth) {
+  const wrap = el('div', { class: 'mapf' });
+  const rowsEl = el('div', { class: 'map-rows' });
+  const recs = [];   // 与 DOM 同序：{ keyEl, getValue }
+  const valIsObj = schemaType(valueSchema) === 'object' && hasProps(valueSchema);
+  const addRow = (k, v, silent) => {
+    const keyEl = el('input', { type: 'text', class: 'mono map-key', placeholder: '键' });
+    keyEl.value = k != null ? k : '';
+    let valEl, valGet;
+    if (valIsObj) {
+      const sub = buildObjectForm(valueSchema, v || {}, root, (depth || 0) + 1);
+      valEl = sub.el; valGet = sub.getValue;
+    } else {
+      const f = renderScalarField('', valueSchema, v, valueSchema, root);
+      const lab = f.el.querySelector('label.f'); if (lab) lab.remove();   // 值不需要标签
+      valEl = f.el; valGet = f.get;
+    }
+    const del = el('button', { type: 'button', class: 'btn btn--danger btn--sm map-del', text: '删除' });
+    const head = el('div', { class: 'map-row-head' }, [keyEl, del]);
+    const body = el('div', { class: 'map-row-body' }); body.appendChild(valEl);
+    const row = el('div', { class: 'map-row' }, [head, body]);
+    const rec = { keyEl, getValue: valGet };
+    recs.push(rec);
+    del.addEventListener('click', () => {
+      const i = recs.indexOf(rec); if (i >= 0) recs.splice(i, 1);
+      row.remove(); notify(wrap);
+    });
+    rowsEl.appendChild(row);
+    if (!silent) notify(wrap);
+  };
+  const entries = (cur && typeof cur === 'object' && !Array.isArray(cur)) ? Object.entries(cur) : [];
+  entries.forEach(([k, v]) => addRow(k, v, true));
+  const addBtn = el('button', { type: 'button', class: 'btn btn--ghost btn--sm map-add', text: '+ 添加键值' });
+  addBtn.addEventListener('click', () => addRow('', valIsObj ? {} : '', false));
+  wrap.append(rowsEl, addBtn);
+  const get = () => {
+    const o = {};
+    recs.forEach(r => {
+      const k = r.keyEl.value.trim();
+      if (!k) return;
+      const v = r.getValue();
+      if (v === '' || v === null || v === undefined) return;
+      o[k] = v;
+    });
+    return o;
+  };
+  return { el: wrap, get };
+}
+
 function renderScalarField(key, s, cur, rawProp, root) {
   const field = el('div');
+  const wide = () => field.classList.add('field--wide');   // 占满整行（⑥）
   const desc = s.description || (rawProp && rawProp.description);
-  const label = el('label', {
-    class: 'f',
-    text: (s.title || (rawProp && rawProp.title) || key) + (desc ? (' — ' + desc) : ''),
-  });
+  // 有描述就只显示描述，不再带字段名（⑤）
+  const labelText = desc || s.title || (rawProp && rawProp.title) || key;
+  const label = el('label', { class: 'f', text: labelText });
   field.appendChild(label);
 
   const t = schemaType(s);
@@ -152,6 +209,7 @@ function renderScalarField(key, s, cur, rawProp, root) {
 
   // —— 自定义控件（k-ui）：命中即自行渲染并提前返回 ——
   if (ui === 'textarea' || ui === 'code') {
+    wide();
     input = el('textarea', { spellcheck: ui === 'code' ? 'false' : 'true' });
     if (ui === 'code') input.classList.add('mono', 'code');
     const rows = parseInt(pick(s, rawProp, 'k-rows'), 10);
@@ -196,6 +254,7 @@ function renderScalarField(key, s, cur, rawProp, root) {
   }
 
   if (ui === 'slider') {
+    wide();
     const min = Number(pick(s, rawProp, 'minimum'));
     const max = Number(pick(s, rawProp, 'maximum'));
     const stepRaw = pick(s, rawProp, 'multipleOf');
@@ -220,6 +279,7 @@ function renderScalarField(key, s, cur, rawProp, root) {
   }
 
   if (ui === 'tags') {
+    wide();
     const itemT = schemaType(resolveSchema(s.items || {}, root));
     const tf = tagsField(cur, itemT);
     field.appendChild(tf.el);
@@ -254,17 +314,27 @@ function renderScalarField(key, s, cur, rawProp, root) {
       get = () => input.value.split(/[,\n]/).map(x => x.trim()).filter(Boolean)
         .map(x => it === 'integer' ? parseInt(x, 10) : it === 'number' ? parseFloat(x) : x);
     } else if (it === 'object') {
+      wide();
       const af = objectArrayField(items, cur, root, 0);   // []struct → 行编辑器
       field.appendChild(af.el);
       return { el: field, get: af.get };
     } else if (it === 'array') {
+      wide();
       const a = jsonArea(cur); input = a.input; get = a.get;   // 数组套数组仍用 JSON
     } else {
+      wide();
       const tf = tagsField(cur, it);                      // 标量数组 → 标签编辑器（默认）
       field.appendChild(tf.el);
       return { el: field, get: tf.get };
     }
   } else if (t === 'object') {
+    if (isMap(s)) {                                        // map[K]V → 键值编辑器（②）
+      wide();
+      const mf = mapField(resolveSchema(s.additionalProperties, root), cur, root, 0);
+      field.appendChild(mf.el);
+      return { el: field, get: mf.get };
+    }
+    wide();
     const a = jsonArea(cur); input = a.input; get = a.get;
   } else {
     input = el('input', { type: 'text' });
@@ -286,14 +356,31 @@ function buildObjectForm(objSchema, value, root, depth) {
     order = req.concat(order.filter(k => req.indexOf(k) < 0));
   }
   const getters = [];
+  // 给嵌套对象/Map 生成一个带标题的整行分组；有描述就只显示描述（③⑤）
+  const groupTitle = (s, raw, key) => {
+    const d = s.description || (raw && raw.description);
+    return d || s.title || (raw && raw.title) || key;
+  };
   for (const key of order) {
     const raw = props[key];
     const s = resolveSchema(raw, root);
     const cur = value[key];
     const t = schemaType(s);
-    if (t === 'object' && s.properties) {
-      const group = el('div', { style: 'grid-column:1 / -1' }, [
-        el('div', { class: 'subgroup-title', text: (s.title || (raw && raw.title) || key) }),
+    if (t === 'object' && isMap(s)) {                       // map[K]V（②）
+      const group = el('div', { class: 'field--wide' }, [
+        el('div', { class: 'subgroup-title', text: groupTitle(s, raw, key) }),
+      ]);
+      const box = el('div', { class: 'subgroup-box' });
+      const mf = mapField(resolveSchema(s.additionalProperties, root), cur, root, depth + 1);
+      box.appendChild(mf.el);
+      group.appendChild(box);
+      wrap.appendChild(group);
+      getters.push([key, mf.get]);
+      continue;
+    }
+    if (t === 'object' && s.properties) {                   // 嵌套结构体
+      const group = el('div', { class: 'field--wide' }, [
+        el('div', { class: 'subgroup-title', text: groupTitle(s, raw, key) }),
       ]);
       const box = el('div', { class: 'subgroup-box' });
       const sub = buildObjectForm(s, cur || {}, root, depth + 1);

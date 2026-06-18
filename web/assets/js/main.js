@@ -51,9 +51,9 @@ function wireButtons() {
   });
 }
 
-// ---- 侧栏导航：滚动高亮当前区块 ----
+// ---- 侧栏导航：滚动高亮当前区块（仅顶层区块链接；插件子导航由 plugins.js 维护）----
 function initNav() {
-  const links = $$('.nav a');
+  const links = $$('.nav > a');
   const byId = {};
   links.forEach(a => { byId[a.getAttribute('href').slice(1)] = a; });
   const sections = $$('.section');

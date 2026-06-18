@@ -38,6 +38,7 @@
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v3a2 2 0 0 0 4 0V3h4a1 1 0 0 1 1 1v4h-3a2 2 0 1 0 0 4h3v4a1 1 0 0 1-1 1h-4v-3a2 2 0 1 0-4 0v3H5a1 1 0 0 1-1-1v-4H7a2 2 0 1 0 0-4H4V4a1 1 0 0 1 1-1z"/></svg>
         插件
       </a>
+      <div id="pluginNav" class="nav-sub"></div>
     </nav>
 
     <div class="side-spacer"></div>
@@ -72,14 +73,11 @@
 
       <!-- 全局设置 -->
       <section id="sec-global" class="section">
-        <h2 class="eyebrow">全局设置</h2>
+        <h2 class="eyebrow">插件全局配置</h2>
         <div class="card">
-          <div class="grid">
-            <div><label class="f">全局启用的群 groups（逗号分隔）</label><input id="gGroups" type="text" class="mono"></div>
-            <div><label class="f">插件配置目录 path</label><input id="gPath" type="text" class="mono"></div>
-          </div>
+          <div id="globalForm"></div>
           <div class="row-actions">
-            <button id="saveGlobal" class="btn btn--primary">保存全局设置</button>
+            <button id="saveGlobal" class="btn btn--primary">保存全局配置</button>
             <span class="saved">已保存</span>
           </div>
         </div>

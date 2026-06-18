@@ -158,8 +158,13 @@ func (s *Supervisor) StartBot() error {
 		return fmt.Errorf("bot 已在运行")
 	}
 	if _, err := os.Stat(s.botBin); err != nil {
-		return fmt.Errorf("找不到 bot 二进制 %q，请先构建一次", s.botBin)
+		_ = s.runBuild()
+		_, err = os.Stat(s.botBin)
+		if err != nil {
+			return fmt.Errorf("找不到 bot 二进制 %q，请先构建一次", s.botBin)
+		}
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, s.botBin, s.botArgs...)
 	cmd.Dir = s.repoDir
@@ -318,7 +323,7 @@ func fmtCmd(c []string) string {
 // DefaultBuildCmd picks build.bat on Windows and ./build.sh elsewhere.
 func DefaultBuildCmd() []string {
 	if runtime.GOOS == "windows" {
-		return []string{"cmd", "/c", "build.bat"}
+		return []string{"cmd", "/c", "chcp 65001 > nul && build.bat"}
 	}
 	return []string{"sh", "build.sh"}
 }

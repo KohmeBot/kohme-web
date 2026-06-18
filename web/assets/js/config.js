@@ -1,16 +1,20 @@
-// config.js — 全局设置、驱动配置（config.json · ZeroBot）的读写，
+// config.js — 插件全局配置、驱动配置（config.json · ZeroBot）的读写，
 // 以及 load()（拉取 /api/config 并交给 plugins 渲染）、loadSchemas()。
-// 驱动配置改为 schema 驱动：用 /api/schemas 里的保留键 kohme-zerobot 渲染表单，
-// 后端未提供时回退到 schema-defaults 里的默认 schema。
+// 全局配置与驱动配置都改为 schema 驱动：分别用 /api/schemas 里的保留键
+// kohme-plugin-global、kohme-zerobot 渲染表单，后端未提供时回退到 schema-defaults。
+//
+// 保存语义（④）：改配置只需重启，不必重新构建——全局/驱动保存一律带 ?rebuild=false，
+// 后端据此只重启 bot、不重新编译。
 
 import { $, flash } from './dom.js';
-import { api, parseGroups } from './api.js';
+import { api } from './api.js';
 import { runOp } from './ops.js';
 import { buildForm } from './schema-form.js';
-import { ZEROBOT_SCHEMA } from './schema-defaults.js';
+import { GLOBAL_SCHEMA, ZEROBOT_SCHEMA } from './schema-defaults.js';
 import * as Plugins from './plugins.js';
 
 let schemas = {};
+let globalGetter = null;   // 当前全局配置表单的取值函数
 let driverGetter = null;   // 当前驱动表单的取值函数
 
 export async function loadSchemas() {
@@ -22,20 +26,30 @@ export function currentSchemas() { return schemas; }
 
 export async function load() {
   const c = await api('GET', '/api/config');
-  $('#gPath').value = c.path || '';
-  $('#gGroups').value = (c.groups || []).join(', ');
+  try { await loadGlobal(); } catch (e) { /* 兜底用空值渲染 */ }
   try { await loadDriver(); } catch (e) { /* config.json 可缺省 */ }
   Plugins.render(c.plugins || [], schemas);
 }
 
-// ---- 全局设置 ----
+// ---- 插件全局配置（schema 驱动）----
+function globalSchema() { return schemas['kohme-plugin-global'] || GLOBAL_SCHEMA; }
+
+export async function loadGlobal() {
+  let value = {};
+  try { value = await api('GET', '/api/global') || {}; }
+  catch (e) { value = {}; }
+  const host = $('#globalForm');
+  host.textContent = '';
+  const form = buildForm(globalSchema(), value);
+  host.appendChild(form.el);
+  globalGetter = form.getValue;
+}
+
 export async function saveGlobal(btn) {
+  if (!globalGetter) return;
   btn.disabled = true;
-  const ok = await runOp('保存全局设置并构建', () =>
-    api('PUT', '/api/global', {
-      path: $('#gPath').value.trim(),
-      groups: parseGroups($('#gGroups').value),
-    }));
+  const ok = await runOp('保存全局配置并重启', () =>
+    api('PUT', '/api/global?rebuild=false', globalGetter()));
   if (ok) flash(btn.parentNode.querySelector('.saved'));
   btn.disabled = false;
 }
@@ -57,8 +71,8 @@ export async function loadDriver() {
 export async function saveDriver(btn) {
   if (!driverGetter) return;
   btn.disabled = true;
-  const ok = await runOp('保存驱动配置并构建', () =>
-    api('PUT', '/api/driver', driverGetter()));
+  const ok = await runOp('保存驱动配置并重启', () =>
+    api('PUT', '/api/driver?rebuild=false', driverGetter()));
   if (ok) flash(btn.parentNode.querySelector('.saved'));
   btn.disabled = false;
 }

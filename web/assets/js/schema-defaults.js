@@ -1,13 +1,16 @@
-// schema-defaults.js — 插件公共配置与驱动配置的「兜底 schema」。
+// schema-defaults.js — 插件公共配置、插件全局配置、驱动配置的「兜底 schema」。
 //
-// 现在这两块也改为 schema 驱动：后端在 /api/schemas 里用保留键
-//   kohme-plugin   → 插件公共字段（除 name / 每插件 conf 之外的元信息）的 schema
-//   kohme-zerobot  → 驱动配置 config.json（ZeroBot）整体对象的 schema
-// 当后端尚未提供（如首次构建前 schema 还没生成）时，前端用下面的默认 schema 渲染，
-// 保证界面始终可用；后端提供后即以后端的为准。这两份默认 schema 同时也是后端应当
+// 这几块都改为 schema 驱动：后端在 /api/schemas 里用保留键
+//   kohme-plugin         → 插件公共字段（除 name / seq / 每插件 conf 之外的元信息）
+//   kohme-plugin-global  → 插件全局配置（path / groups 等）
+//   kohme-zerobot        → 驱动配置 config.json（ZeroBot）整体对象
+// 当后端尚未提供时（如首次构建前 schema 还没生成），前端用下面的默认 schema 渲染，
+// 保证界面始终可用；后端提供后即以后端的为准。这几份默认 schema 同时也是后端应当
 // 产出的结构样板——字段名必须与 DTO 对应：
 //   插件 DTO：{ name, repo, version, seq, disable, exclude, groups, confValue|confYaml }
-//             （name 是身份，conf 由每插件 schema 单独负责，二者都不应出现在 kohme-plugin 里）
+//             （name 是身份、seq 由卡片的排序控件管理，二者都不应出现在 kohme-plugin 里；
+//              每插件 conf 由该插件自己的 schema 负责）
+//   全局 PUT：{ path, groups }
 //   驱动 PUT：{ zero:{...}, ws:{url,token}, rws:{url,token} }
 //
 // 任何字段都可叠加 k-ui 自定义控件（见 schema-form.js / ui.go），例如 token 用 secret、
@@ -18,13 +21,23 @@ export const PLUGIN_COMMON_SCHEMA = {
   properties: {
     repo:    { type: 'string',  title: '仓库 repo' },
     version: { type: 'string',  title: '版本 version' },
-    seq:     { type: 'integer', title: '加载顺序 seq' },
     groups:  {
       type: 'array', items: { type: 'integer' }, 'k-ui': 'tags',
       title: '本插件启用的群', description: '留空用全局',
     },
     disable: { type: 'boolean', title: '禁用功能（仍编译加载）' },
     exclude: { type: 'boolean', title: '排除（不编译进 bot）' },
+  },
+};
+
+export const GLOBAL_SCHEMA = {
+  type: 'object',
+  properties: {
+    groups: {
+      type: 'array', items: { type: 'integer' }, 'k-ui': 'tags',
+      title: '全局启用的群 groups', description: '所有未单独设置群的插件都在这些群生效',
+    },
+    path: { type: 'string', title: '插件配置目录 path' },
   },
 };
 
