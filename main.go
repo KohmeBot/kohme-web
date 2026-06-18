@@ -103,7 +103,8 @@ func main() {
 	mux.HandleFunc("POST /api/auth/change", auth(handleChangePassword))
 	mux.HandleFunc("GET /api/config", auth(handleConfig))
 	mux.HandleFunc("PUT /api/plugins", auth(handlePluginsBulk))
-	mux.HandleFunc("PUT /api/global", auth(handleGlobal))
+	mux.HandleFunc("GET /api/global", auth(handleGlobalGet))
+	mux.HandleFunc("PUT /api/global", auth(handleGlobalPut))
 	mux.HandleFunc("GET /api/driver", auth(handleDriverGet))
 	mux.HandleFunc("PUT /api/driver", auth(handleDriverPut))
 	mux.HandleFunc("GET /api/status", auth(handleStatus))
@@ -370,7 +371,21 @@ func handlePluginsBulk(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleGlobal(w http.ResponseWriter, r *http.Request) {
+func handleGlobalGet(w http.ResponseWriter, r *http.Request) {
+	c, err := store.Load()
+	if err != nil {
+		httpErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"path":   c.Path,
+		"groups": c.Groups,
+		"env":    c.Other,
+	})
+
+}
+
+func handleGlobalPut(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path   string  `json:"path"`
 		Groups []int64 `json:"groups"`
