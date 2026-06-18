@@ -39,7 +39,7 @@ var (
 
 func main() {
 	var (
-		addr       = flag.String("addr", "127.0.0.1:8787", "监听地址。默认只听本机，切勿直接暴露公网")
+		addr       = flag.String("addr", "0.0.0.0:8787", "监听地址。")
 		repoDir    = flag.String("repo", ".", "kohme 仓库根目录")
 		pluginsRel = flag.String("plugins", "conf/plugins.yaml", "plugins.yaml 相对仓库根目录的路径")
 		configRel  = flag.String("config", "conf/config.json", "config.json（ZeroBot 驱动配置）相对仓库根目录的路径")
