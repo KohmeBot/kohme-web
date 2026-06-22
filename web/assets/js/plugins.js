@@ -1,29 +1,41 @@
-// plugins.js — 插件区控制器。
-// 所有增删改都在前端“暂存”为卡片状态，最后点「保存并…」一次性提交（PUT /api/plugins）。
-// 公共字段 schema 驱动（kohme-plugin，缺省回退默认 schema）；name 是身份、seq 由排序控件管理，
-// 二者都从公共表单里剥离。内置插件 core 只保留必要字段，seq 固定 0 且不可改、不可拖动。
+// plugins.js — 插件区控制器（每个插件一个独立页面）。
 //
-// 保存语义（④）：只有「新增 / 删除」插件才需要重新构建（rebuild=true）；仅修改配置（含改 seq、
-// 改 conf）只需重启（rebuild=false）。
+// 视图结构（②）：左侧「插件」子导航列出全部插件（含「＋ 添加插件」入口），点击切换到
+// 对应插件页；每个插件页有「简介 / 配置」两个页签——简介展示该插件的 README（见 readme.js），
+// 配置即原来的表单卡片。任一时刻只显示选中的那一页，但所有插件页始终挂载在 DOM 中，
+// 因此暂存收集 / diff / 保存逻辑与原瀑布流完全一致。
+//
+// 暂存语义：所有增删改都在前端「暂存」为页面状态，最后点「保存并…」一次性提交
+// （PUT /api/plugins）。只有「新增 / 删除」插件才需要重新构建（rebuild=true）；仅修改配置
+// （含改顺序 seq、改 conf）只需重启（rebuild=false）。
+//
+// 排序：桌面端可在左侧导航拖拽；移动端用插件页内的 ▲▼ 按钮上/下移。core 钉在最前、seq=0。
 //
 // 依赖通过 bind() 注入 load / loadSchemas，避免与 config 模块循环依赖。
 
-import { $, el, toast } from './dom.js';
+import { $, $$, el, toast } from './dom.js';
 import { api } from './api.js';
 import { runOp } from './ops.js';
-import { buildForm,resolveSchema } from './schema-form.js';
+import { buildForm, resolveSchema } from './schema-form.js';
 import { PLUGIN_COMMON_SCHEMA } from './schema-defaults.js';
-
+import { renderReadmeInto, clearReadmeCache } from './readme.js';
 
 let schemas = {};
 let committedJSON = '[]';
 let deps = { load: async () => {}, loadSchemas: async () => {} };
 let dndReady = false;
+let selected = null;   // 当前选中的插件名
 
 export function bind(d) { deps = { ...deps, ...d }; }
 
 const cssId = (s) => 'plugin-' + String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
-const coreCard = () => $('#plugins').querySelector('.card[data-builtin="1"]');
+const corePage = () => $('#plugins').querySelector('.plugin-page[data-builtin="1"]');
+const pages = () => [...$('#plugins').querySelectorAll('.plugin-page')];
+
+// 请求切换主视图（由 main.js 的路由统一处理）
+function requestView(view, plugin) {
+  window.dispatchEvent(new CustomEvent('kohme:view', { detail: { view, plugin } }));
+}
 
 // 去掉 schema 里由别处管理的字段（name/seq 始终去；core 再去掉这几个无意义字段）
 function commonSchemaFor(builtin) {
@@ -32,48 +44,74 @@ function commonSchemaFor(builtin) {
   const top = resolveSchema(root, root);
   const props = { ...(top.properties || {}) };
   ['name', 'seq'].forEach(k => delete props[k]);
-  if (builtin) ['repo', 'version', 'disable', 'exclude'].forEach(k => delete props[k]);   // ⑦
+  if (builtin) ['repo', 'version', 'disable', 'exclude'].forEach(k => delete props[k]);
   return { ...top, properties: props };
 }
 
-// ---- 单个插件卡片 ----
-function pluginCard(p, opts = {}) {
+// ---- 单个插件页面（head + 简介/配置两页签）----
+function pluginPage(p, opts = {}) {
   const isNew = !!opts.isNew;
   const builtin = p.name === 'core';
   const schema = isNew ? null : (schemas || {})[p.name];
   const showConf = !isNew;
 
-  const card = el('div', { class: 'card' + (isNew ? ' isnew' : '') + ' card--enter' });
-  card.id = cssId(p.name);
-  card.dataset.name = p.name;
-  card.dataset.builtin = builtin ? '1' : '0';
-  card._isNew = isNew;
-  card._deleted = false;
+  const page = el('div', { class: 'plugin-page' + (isNew ? ' isnew' : '') });
+  page.id = cssId(p.name);
+  page.dataset.name = p.name;
+  page.dataset.builtin = builtin ? '1' : '0';
+  page._isNew = isNew;
+  page._deleted = false;
+  page._seq = builtin ? 0 : (p.seq || 0);
+  page._tab = 'config';            // 默认页签，简介加载成功后会切到 readme
+  page._readmeLoaded = false;
+  page._hasReadme = undefined;
 
-  // 顶部：拖动柄 + 名称 + 状态标签 + 顺序控件
-  const top = el('div', { class: 'top' });
-  if (!builtin) {
-    const grip = el('span', { class: 'grip', title: '拖动调整顺序', text: '⠿' });
-    grip.draggable = true;
-    wireCardDrag(grip, card);
-    top.appendChild(grip);
-  }
-  top.appendChild(el('span', { class: 'name', text: p.name }));
-  top.appendChild(el('span', { class: 'tag' + (p.disable ? ' off' : ' ok'), text: p.disable ? '功能已禁用' : '已启用' }));
-  if (p.exclude) top.appendChild(el('span', { class: 'tag off', text: '不编译' }));
-  if (builtin)   top.appendChild(el('span', { class: 'tag off', text: '内置' }));
-  if (isNew)     top.appendChild(el('span', { class: 'tag new', text: '新增 · 未保存' }));
+  // ===== 页头：标题行 + 页签 =====
+  const head = el('div', { class: 'pp-head' });
+
+  const titleRow = el('div', { class: 'pp-titlerow' });
+  titleRow.appendChild(el('span', { class: 'pp-name', text: p.name }));
+  const statusTag = el('span', { class: 'tag' + (p.disable ? ' off' : ' ok'), text: p.disable ? '功能已禁用' : '已启用' });
+  page._statusTag = statusTag;
+  titleRow.appendChild(statusTag);
+  if (p.exclude) titleRow.appendChild(el('span', { class: 'tag off', text: '不编译' }));
+  if (builtin)   titleRow.appendChild(el('span', { class: 'tag off', text: '内置' }));
+  if (isNew)     titleRow.appendChild(el('span', { class: 'tag new', text: '新增 · 未保存' }));
   const delTag = el('span', { class: 'tag del-tag', style: 'display:none', text: '待删除 · 保存后生效' });
-  top.appendChild(delTag);
+  titleRow.appendChild(delTag);
 
-  // 顺序（seq = 加载顺序）：由卡片在列表中的位置决定（拖动调整），这里只读显示，core 固定 0
-  top.appendChild(el('span', { class: 'spacer' }));
+  titleRow.appendChild(el('span', { class: 'spacer' }));
+
+  if (!builtin) {
+    const up = el('button', { class: 'btn btn--ghost btn--sm pp-move', title: '上移加载顺序', 'aria-label': '上移', text: '▲' });
+    const down = el('button', { class: 'btn btn--ghost btn--sm pp-move', title: '下移加载顺序', 'aria-label': '下移', text: '▼' });
+    up.onclick = () => movePage(page, -1);
+    down.onclick = () => movePage(page, 1);
+    titleRow.append(up, down);
+  }
   const seqBadge = el('span', { class: 'seqbox', text: builtin ? '顺序 0' : '顺序 —' });
-  seqBadge.title = '加载顺序 seq（拖动卡片或导航栏调整）';
-  card._seqBadge = seqBadge;
-  card._seq = builtin ? 0 : (p.seq || 0);
-  top.appendChild(seqBadge);
-  card.appendChild(top);
+  seqBadge.title = '加载顺序 seq';
+  page._seqBadge = seqBadge;
+  titleRow.appendChild(seqBadge);
+  head.appendChild(titleRow);
+
+  // 页签
+  const tabs = el('div', { class: 'pp-tabs' });
+  const tabReadme = el('button', { class: 'pp-tab', 'data-tab': 'readme', text: '简介' });
+  const tabConfig = el('button', { class: 'pp-tab', 'data-tab': 'config', text: '配置' });
+  tabs.append(tabReadme, tabConfig);
+  head.appendChild(tabs);
+  page._tabs = { readme: tabReadme, config: tabConfig };
+  page.appendChild(head);
+
+  // ===== 简介页（懒加载）=====
+  const readmePane = el('div', { class: 'plugin-pane', 'data-pane': 'readme' });
+  page._readmePane = readmePane;
+  page.appendChild(readmePane);
+
+  // ===== 配置页（原卡片）=====
+  const configPane = el('div', { class: 'plugin-pane', 'data-pane': 'config' });
+  const card = el('div', { class: 'card' });
 
   // 公共字段（schema 驱动；name/seq 已剥离）
   const commonForm = buildForm(commonSchemaFor(builtin), p);
@@ -100,20 +138,23 @@ function pluginCard(p, opts = {}) {
       text: '新插件的自定义配置 conf 需在保存构建、bot 生成 schema 之后才能编辑；此处仅设置公共配置。' }));
   }
 
-  // 行内操作
+  // 行内操作（删除 / 撤销删除）
   const actions = el('div', { class: 'row-actions' });
   let delBtn = null, undelBtn = null;
   if (!builtin) {
-    delBtn   = el('button', { class: 'btn btn--danger btn--sm', text: '删除' });
+    delBtn   = el('button', { class: 'btn btn--danger btn--sm', text: '删除插件' });
     undelBtn = el('button', { class: 'btn btn--ghost btn--sm', style: 'display:none', text: '撤销删除' });
     actions.append(delBtn, undelBtn);
   }
   card.appendChild(actions);
+  configPane.appendChild(card);
+  page.appendChild(configPane);
 
-  card._getDTO = function () {
+  // ---- DTO ----
+  page._getDTO = function () {
     const common = commonForm.getValue();
     delete common.name; delete common.seq;
-    const dto = { name: p.name, seq: builtin ? 0 : (Number(card._seq) || 0), ...common };
+    const dto = { name: p.name, seq: builtin ? 0 : (Number(page._seq) || 0), ...common };
     if (showConf) {
       if (confGetter) dto.confValue = confGetter();
       else if (card._confTextarea) dto.confYaml = card._confTextarea.value;
@@ -121,34 +162,131 @@ function pluginCard(p, opts = {}) {
     return dto;
   };
 
-  card.addEventListener('input', refreshDirty);
-  card.addEventListener('change', refreshDirty);
+  page.addEventListener('input', refreshDirty);
+  page.addEventListener('change', refreshDirty);
+
+  // ---- 页签切换 ----
+  page._selectTab = function (which) {
+    page._tab = which;
+    tabReadme.classList.toggle('active', which === 'readme');
+    tabConfig.classList.toggle('active', which === 'config');
+    readmePane.classList.toggle('show', which === 'readme');
+    configPane.classList.toggle('show', which === 'config');
+    if (which === 'readme') ensureReadme(page);
+  };
+  tabReadme.onclick = () => page._selectTab('readme');
+  tabConfig.onclick = () => page._selectTab('config');
+
+  // ---- 删除 / 撤销 ----
+  const setDisabled = (on) => page.querySelectorAll(
+    'input,textarea,select,button.chip-x,button.arr-add,button.arr-del,button.map-add,button.map-del,.secret-toggle'
+  ).forEach(x => x.disabled = on);
 
   if (delBtn) delBtn.onclick = () => {
-    if (isNew) { card.remove(); renumber(); rebuildNav(); refreshDirty(); return; }
-    card._deleted = true;
-    card.classList.add('pending-del');
+    if (isNew) {
+      const wasSelected = selected === page.dataset.name;
+      page.remove(); renumber(); rebuildNav(); refreshDirty();
+      if (wasSelected) { const f = firstName(); if (f) requestView('plugins', f); else requestView('add'); }
+      return;
+    }
+    page._deleted = true;
+    page.classList.add('pending-del');
     delTag.style.display = '';
     delBtn.style.display = 'none';
     undelBtn.style.display = '';
-    card.querySelectorAll('input,textarea,select,button.chip-x,button.arr-add,button.arr-del,button.map-add,button.map-del,.secret-toggle').forEach(x => x.disabled = true);
+    setDisabled(true);
     renumber(); rebuildNav(); refreshDirty();
   };
   if (undelBtn) undelBtn.onclick = () => {
-    card._deleted = false;
-    card.classList.remove('pending-del');
+    page._deleted = false;
+    page.classList.remove('pending-del');
     delTag.style.display = 'none';
     delBtn.style.display = '';
     undelBtn.style.display = 'none';
-    card.querySelectorAll('input,textarea,select,button.chip-x,button.arr-add,button.arr-del,button.map-add,button.map-del,.secret-toggle').forEach(x => x.disabled = false);
+    setDisabled(false);
     renumber(); rebuildNav(); refreshDirty();
   };
 
-  return card;
+  return page;
 }
 
-// ---- 排序 / 拖动（⑩）----
-let dragCard = null;
+// 懒加载简介；若无 README 则隐藏「简介」页签并回落到配置页。
+async function ensureReadme(page) {
+  if (page._readmeLoaded) return;
+  page._readmeLoaded = true;
+  const name = page.dataset.name;
+  const state = await renderReadmeInto(page._readmePane, name);
+  page._hasReadme = state === 'ok';
+  if (state !== 'ok') {
+    page._tabs.readme.classList.add('hide');     // 没有简介就不展示该页签
+    if (page._tab === 'readme') page._selectTab('config');
+  }
+}
+
+// ---- 排序 ----
+function movePage(page, dir) {
+  const list = $('#plugins');
+  const movable = pages().filter(p => p.dataset.builtin !== '1' && !p._deleted);
+  const i = movable.indexOf(page);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= movable.length) return;
+  const target = movable[j];
+  if (dir < 0) list.insertBefore(page, target);
+  else list.insertBefore(target, page);
+  renumber(); rebuildNav(); refreshDirty();
+}
+
+// 顺序由 DOM 位置决定：core 钉第一、seq=0；其余非删除页按位置编号 1..n。
+function renumber() {
+  const list = $('#plugins');
+  const core = corePage();
+  if (core && list.firstElementChild !== core) list.insertBefore(core, list.firstElementChild);
+  let n = 0;
+  pages().forEach(page => {
+    if (page.dataset.builtin === '1') {
+      page._seq = 0;
+      if (page._seqBadge) page._seqBadge.textContent = '顺序 0';
+      return;
+    }
+    if (page._deleted) { if (page._seqBadge) page._seqBadge.textContent = '顺序 —'; return; }
+    n++;
+    page._seq = n;
+    if (page._seqBadge) page._seqBadge.textContent = '顺序 ' + n;
+  });
+}
+
+// 按给定名字顺序重排（导航栏拖动用）：core 强制第一
+function applyOrder(names) {
+  const list = $('#plugins');
+  const byName = {};
+  pages().forEach(c => { byName[c.dataset.name] = c; });
+  const seen = {}; const ordered = [];
+  const core = byName['core'];
+  if (core) { ordered.push(core); seen['core'] = 1; }
+  names.forEach(n => { if (byName[n] && !seen[n]) { ordered.push(byName[n]); seen[n] = 1; } });
+  pages().forEach(c => { if (!seen[c.dataset.name]) { ordered.push(c); seen[c.dataset.name] = 1; } });
+  ordered.forEach(c => list.appendChild(c));
+  renumber(); rebuildNav(); refreshDirty();
+}
+
+// 容器级导航拖拽只装一次
+function initDnd() {
+  if (dndReady) return;
+  dndReady = true;
+  const nav = $('#pluginNav');
+  if (!nav) return;
+  nav.addEventListener('dragover', (e) => {
+    const dragging = nav.querySelector('.nav-sub-link.dragging');
+    if (!dragging) return;
+    e.preventDefault();
+    let after = getAfter(nav, e.clientY, '.nav-sub-link[data-name]:not(.dragging)');
+    const coreLink = nav.querySelector('.nav-sub-link[data-name="core"]');
+    if (after === coreLink) after = coreLink ? coreLink.nextElementSibling : null;
+    if (after == null) nav.appendChild(dragging);
+    else nav.insertBefore(dragging, after);
+  });
+  nav.addEventListener('drop', (e) => { e.preventDefault(); });
+}
 
 function getAfter(container, y, sel) {
   const els = [...container.querySelectorAll(sel)];
@@ -161,134 +299,67 @@ function getAfter(container, y, sel) {
   return best.el;
 }
 
-function wireCardDrag(grip, card) {
-  grip.addEventListener('dragstart', (e) => {
-    dragCard = card; card.classList.add('dragging');
-    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', card.dataset.name); } catch (_) {}
-  });
-  grip.addEventListener('dragend', () => {
-    card.classList.remove('dragging'); dragCard = null;
-    renumber(); rebuildNav(); refreshDirty();
-  });
-}
-
-// 顺序由 DOM 位置决定：core 钉在第一、seq=0；其余非删除卡片按位置编号 1..n。
-// 把结果写进 card._seq 并刷新只读徽标。
-function renumber() {
-  const list = $('#plugins');
-  const core = coreCard();
-  if (core && list.firstElementChild !== core) list.insertBefore(core, list.firstElementChild);
-  let n = 0;
-  [...list.querySelectorAll('.card')].forEach(card => {
-    if (card.dataset.builtin === '1') {
-      card._seq = 0;
-      if (card._seqBadge) card._seqBadge.textContent = '顺序 0';
-      return;
-    }
-    if (card._deleted) return;                 // 待删除的不占编号，也不会被保存
-    n++;
-    card._seq = n;
-    if (card._seqBadge) card._seqBadge.textContent = '顺序 ' + n;
-  });
-}
-
-// 按给定名字顺序重排（导航栏拖动用）：core 强制第一，随后顺序重编号
-function applyOrder(names) {
-  const list = $('#plugins');
-  const byName = {};
-  [...list.querySelectorAll('.card')].forEach(c => { byName[c.dataset.name] = c; });
-  const seen = {}; const ordered = [];
-  const core = byName['core'];
-  if (core) { ordered.push(core); seen['core'] = 1; }
-  names.forEach(n => { if (byName[n] && !seen[n]) { ordered.push(byName[n]); seen[n] = 1; } });
-  [...list.querySelectorAll('.card')].forEach(c => { if (!seen[c.dataset.name]) { ordered.push(c); seen[c.dataset.name] = 1; } });
-  ordered.forEach(c => list.appendChild(c));
-  renumber(); rebuildNav(); refreshDirty();
-}
-
-// 容器级 DnD 监听只装一次（render 清空的是 innerHTML，元素本身的监听不丢）
-function initDnd() {
-  if (dndReady) return;
-  dndReady = true;
-  const list = $('#plugins');
-  if (list) list.addEventListener('dragover', (e) => {
-    if (!dragCard) return;
-    e.preventDefault();
-    const core = coreCard();
-    let after = getAfter(list, e.clientY, '.card:not(.dragging)');
-    if (after === core) after = core ? core.nextElementSibling : null;   // 不得排到 core 之前
-    if (after == null) list.appendChild(dragCard);
-    else list.insertBefore(dragCard, after);
-  });
-
-  const nav = $('#pluginNav');
-  if (nav) {
-    nav.addEventListener('dragover', (e) => {
-      const dragging = nav.querySelector('.nav-sub-link.dragging');
-      if (!dragging) return;
-      e.preventDefault();
-      let after = getAfter(nav, e.clientY, '.nav-sub-link:not(.dragging)');
-      const coreLink = nav.querySelector('.nav-sub-link[data-name="core"]');
-      if (after === coreLink) after = coreLink ? coreLink.nextElementSibling : null;
-      if (after == null) nav.appendChild(dragging);
-      else nav.insertBefore(dragging, after);
-    });
-    nav.addEventListener('drop', (e) => { e.preventDefault(); });
-  }
-}
-
-// ---- 侧栏插件导航（⑨）+ 滚动高亮 ----
-let cardObs = null;
+// ---- 左侧插件子导航 ----
 function rebuildNav() {
   const nav = $('#pluginNav');
   if (!nav) return;
   nav.textContent = '';
-  const cards = [...$('#plugins').querySelectorAll('.card')];
-  cards.forEach(card => {
-    const name = card.dataset.name;
-    const a = el('a', { class: 'nav-sub-link', href: '#' + card.id });
+
+  // ＋ 添加插件
+  const addLink = el('a', { class: 'nav-sub-link nav-sub-add', href: '#' });
+  addLink.appendChild(el('span', { class: 'nav-sub-name', text: '＋ 添加插件' }));
+  addLink.addEventListener('click', e => { e.preventDefault(); requestView('add'); });
+  nav.appendChild(addLink);
+
+  pages().forEach(page => {
+    const name = page.dataset.name;
+    const builtin = page.dataset.builtin === '1';
+    const a = el('a', { class: 'nav-sub-link', href: '#' + page.id });
     a.dataset.name = name;
-    const builtin = card.dataset.builtin === '1';
     if (!builtin) {
       a.draggable = true;
       a.addEventListener('dragstart', () => a.classList.add('dragging'));
       a.addEventListener('dragend', () => {
         a.classList.remove('dragging');
-        const order = [...nav.querySelectorAll('.nav-sub-link')].map(x => x.dataset.name);
+        const order = [...nav.querySelectorAll('.nav-sub-link[data-name]')].map(x => x.dataset.name);
         applyOrder(order);
       });
       a.appendChild(el('span', { class: 'nav-grip', text: '⠿' }));
     }
     a.appendChild(el('span', { class: 'nav-sub-name', text: name }));
-    if (card._deleted) a.classList.add('is-del');
-    a.addEventListener('click', (e) => { e.preventDefault(); card.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    if (page._deleted) a.classList.add('is-del');
+    if (name === selected) a.classList.add('active');
+    a.addEventListener('click', e => { e.preventDefault(); requestView('plugins', name); });
     nav.appendChild(a);
   });
-  observeCards(cards, nav);
 }
 
-function observeCards(cards, nav) {
-  if (cardObs) cardObs.disconnect();
-  if (!('IntersectionObserver' in window)) return;
-  cardObs = new IntersectionObserver((ents) => {
-    ents.forEach(en => {
-      if (!en.isIntersecting) return;
-      const links = [...nav.querySelectorAll('.nav-sub-link')];
-      links.forEach(l => l.classList.remove('active'));
-      const a = links.find(l => l.dataset.name === en.target.dataset.name);
-      if (a) a.classList.add('active');
-    });
-  }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
-  cards.forEach(c => cardObs.observe(c));
+// ---- 选中并显示某个插件页 ----
+export function select(name) {
+  const list = $('#plugins');
+  if (!list) return;
+  const all = pages();
+  if (!all.length) { selected = null; return; }
+  let target = all.find(p => p.dataset.name === name) || all.find(p => p.dataset.name === selected) || all[0];
+  selected = target.dataset.name;
+  all.forEach(p => p.classList.toggle('is-active', p === target));
+  $$('#pluginNav .nav-sub-link').forEach(a =>
+    a.classList.toggle('active', a.dataset.name === selected));
+  target._selectTab(target._tab || 'readme');
+  // 首次进入默认尝试简介；ensureReadme 若发现没有 README 会自动回落到配置
+  if (!target._readmeLoaded) target._selectTab('readme');
 }
+
+export function firstName() {
+  const p = $('#plugins') && $('#plugins').querySelector('.plugin-page');
+  return p ? p.dataset.name : null;
+}
+export function selectedName() { return selected; }
 
 // ---- 暂存收集 / diff / 脏状态 ----
 function collectWork() {
   const out = [];
-  $('#plugins').querySelectorAll('.card').forEach(card => {
-    if (card._deleted) return;
-    out.push(card._getDTO());
-  });
+  pages().forEach(page => { if (!page._deleted) out.push(page._getDTO()); });
   return out;
 }
 
@@ -298,9 +369,9 @@ function pluginDiff() {
   const byName = {};
   committed.forEach(p => { byName[p.name] = JSON.stringify(p); });
   let added = 0, modified = 0, removed = 0;
-  $('#plugins').querySelectorAll('.card').forEach(card => {
-    const dto = card._getDTO();
-    if (card._deleted) { if (dto.name in byName) removed++; return; }
+  pages().forEach(page => {
+    const dto = page._getDTO();
+    if (page._deleted) { if (dto.name in byName) removed++; return; }
     if (!(dto.name in byName)) added++;
     else if (JSON.stringify(dto) !== byName[dto.name]) modified++;
   });
@@ -311,6 +382,7 @@ export function diffTotal() { return pluginDiff().total; }
 function refreshDirty() {
   const d = pluginDiff();
   const bar = $('#pluginDirty');
+  if (!bar) return;
   if (d.total > 0) {
     const needBuild = d.added > 0 || d.removed > 0;
     $('#pluginDirtyText').textContent =
@@ -327,25 +399,34 @@ export function render(plugins, sch) {
   schemas = sch || {};
   initDnd();
   const list = $('#plugins');
+  const prev = selected;
   list.innerHTML = '';
   (plugins || []).slice()
     .sort((a, b) => ((a.name === 'core' ? -1 : a.seq) - (b.name === 'core' ? -1 : b.seq)) || a.name.localeCompare(b.name))
-    .forEach(p => list.appendChild(pluginCard(p, {})));
-  renumber();                       // 顺序归一为 0..n（顺序即 seq）
+    .forEach(p => list.appendChild(pluginPage(p, {})));
+  renumber();
   committedJSON = JSON.stringify(collectWork());
   rebuildNav();
   refreshDirty();
+
+  const names = pages().map(p => p.dataset.name);
+  const empty = $('#pluginEmpty');
+  if (empty) empty.classList.toggle('hide', names.length > 0);
+
+  selected = (prev && names.includes(prev)) ? prev : (names[0] || null);
+  if (selected) select(selected);
 }
 
 // ---- 保存 / 放弃 / 添加 ----
 export async function save(btn) {
   const d = pluginDiff();
-  const needBuild = d.added > 0 || d.removed > 0;   // ④
+  const needBuild = d.added > 0 || d.removed > 0;
   if (btn) btn.disabled = true;
   const ok = await runOp(needBuild ? '保存插件更改并重新构建' : '保存插件更改并重启', () =>
     api('PUT', '/api/plugins?rebuild=' + (needBuild ? 'true' : 'false'), { plugins: collectWork() }));
   if (btn) btn.disabled = false;
   if (ok) {
+    clearReadmeCache();           // 可能拉取了新版本插件，简介随之更新
     await deps.loadSchemas();
     await deps.load();
     toast(needBuild ? '插件已保存并重新构建' : '插件已保存并重启', 'ok');
@@ -357,25 +438,21 @@ export function discard() {
   deps.load();
 }
 
-// 暂存一个新插件。未填 repo/version 时给默认值（⑧）。新插件接在末尾，顺序（seq）由位置决定。
+// 暂存一个新插件。未填 repo/version 时给默认值。新插件接在末尾，顺序由位置决定。
 export function add({ name, repo, version }) {
   if (!name) { toast('请填写插件名', 'err'); return false; }
   let dup = false;
-  $('#plugins').querySelectorAll('.card').forEach(card => {
-    if (!card._deleted && card.dataset.name === name) dup = true;
-  });
+  pages().forEach(page => { if (!page._deleted && page.dataset.name === name) dup = true; });
   if (dup) { toast(`插件 ${name} 已在列表中`, 'err'); return false; }
 
   const finalRepo = (repo && repo.trim()) ? repo.trim() : `github.com/kohmebot/${name}`;
   const finalVer  = (version && version.trim()) ? version.trim() : 'latest';
 
-  const p = { name, repo: finalRepo, version: finalVer,
-    groups: [], disable: false, exclude: false };
-  const card = pluginCard(p, { isNew: true });
-  $('#plugins').appendChild(card);
-  renumber();                       // 追加在末尾 → 自动拿到最大的 seq
-  rebuildNav();
-  refreshDirty();
-  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const p = { name, repo: finalRepo, version: finalVer, groups: [], disable: false, exclude: false };
+  const page = pluginPage(p, { isNew: true });
+  page._tab = 'config';           // 新插件还没 README，直接停在配置
+  $('#plugins').appendChild(page);
+  renumber(); rebuildNav(); refreshDirty();
+  requestView('plugins', name);   // 跳到新插件页
   return true;
 }

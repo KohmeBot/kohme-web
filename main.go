@@ -114,6 +114,8 @@ func main() {
 	mux.HandleFunc("POST /api/actions/start", auth(handleStart))
 	mux.HandleFunc("POST /api/actions/stop", auth(handleStop))
 	mux.HandleFunc("GET /api/stream", auth(handleStream))
+	mux.HandleFunc("GET /api/plugins/{name}/doc/README.md", handlePluginREADME)
+	mux.HandleFunc("GET /api/plugins/{name}/doc/{path...}", handlePluginDocFile)
 
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(sub)))
@@ -538,6 +540,68 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 			fl.Flush()
 		}
 	}
+}
+
+func handlePluginREADME(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	path := filepath.Join(sup.repoDir,
+		".docs",
+		"docs",
+		name,
+		"README.md",
+	)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Write(data)
+}
+
+func handlePluginDocFile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	rel := r.PathValue("path")
+
+	if strings.Contains(rel, "..") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	root := filepath.Join(sup.repoDir,
+		".docs",
+		"docs",
+		name,
+	)
+
+	file := filepath.Join(root, rel)
+
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fileAbs, err := filepath.Abs(file)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	if !strings.HasPrefix(fileAbs, rootAbs) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	http.ServeFile(w, r, file)
 }
 
 // ---- helpers ----

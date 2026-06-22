@@ -60,29 +60,54 @@ function wireEvent() {
   });
 }
 
-// ---- 侧栏导航：滚动高亮当前区块（仅顶层区块链接；插件子导航由 plugins.js 维护）----
+// ---- 移动端抽屉：汉堡开 / 遮罩·关闭按钮·Esc 关，点导航后自动收起 ----
+function initDrawer() {
+  const open  = () => document.body.classList.add('drawer-open');
+  const close = () => document.body.classList.remove('drawer-open');
+  $('#drawerToggle') && $('#drawerToggle').addEventListener('click', open);
+  $('#drawerClose')  && $('#drawerClose').addEventListener('click', close);
+  $('#scrim')        && $('#scrim').addEventListener('click', close);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  // 抽屉内任意导航链接（区块链接 / 插件子导航）点击后收起，露出内容
+  const side = $('.sidebar');
+  if (side) side.addEventListener('click', e => { if (e.target.closest('a')) close(); });
+}
+
+// ---- 主视图路由：全局设置 / 驱动配置 / 插件（按插件分页）/ 添加插件 ----
+// 顶层导航与插件子导航都通过 showView() 切换；任一时刻只显示一个视图。
+function setTopNavActive(view) {
+  const key = (view === 'add') ? 'plugins' : view;   // 添加插件归属「插件」
+  $$('.nav > a').forEach(a => a.classList.toggle('active', a.dataset.view === key));
+}
+
+function showView(view, detail = {}) {
+  const views = $$('.view');
+  if (!views.some(v => v.dataset.view === view)) view = 'global';
+  views.forEach(v => v.classList.toggle('is-active', v.dataset.view === view));
+  setTopNavActive(view);
+  if (view === 'plugins') {
+    const name = detail.plugin || Plugins.selectedName() || Plugins.firstName();
+    if (name) Plugins.select(name);
+  }
+  // 切视图回到顶部；移动端切完顺手收起抽屉
+  window.scrollTo(0, 0);
+  document.body.classList.remove('drawer-open');
+}
+
 function initNav() {
-  const links = $$('.nav > a');
-  const byId = {};
-  links.forEach(a => { byId[a.getAttribute('href').slice(1)] = a; });
-  const sections = $$('.section');
-  if (!('IntersectionObserver' in window) || !sections.length) return;
-  const obs = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-      if (en.isIntersecting) {
-        links.forEach(a => a.classList.remove('active'));
-        const a = byId[en.target.id];
-        if (a) a.classList.add('active');
-      }
-    });
-  }, { rootMargin: '-45% 0px -50% 0px', threshold: 0 });
-  sections.forEach(s => obs.observe(s));
+  $$('.nav > a').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); showView(a.dataset.view); });
+  });
+  window.addEventListener('kohme:view', e => showView(e.detail.view, e.detail));
 }
 
 // ---- 启动 ----
 async function boot() {
   try { await loadSchemas(); await load(); }
   catch (e) { if (e.message === '未授权') return; }
+  // 选择初始视图：有插件就直接进入插件页，否则落到全局设置
+  const first = Plugins.firstName();
+  showView(first ? 'plugins' : 'global', first ? { plugin: first } : {});
   try {
     const st = await fetch('/api/auth/state', { credentials: 'include' }).then(r => r.json());
     if (st.username) {
@@ -99,6 +124,7 @@ function start() {
   initAuth(boot);
   wireEvent();
   initNav();
+  initDrawer();
 
   // 移动端默认收起底部日志台，避免吃掉过多竖向空间（用户可随时点按展开）
   if (window.matchMedia && window.matchMedia('(max-width:600px)').matches) {

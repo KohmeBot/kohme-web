@@ -17,6 +17,14 @@ function renderStatus(s) {
   $('#statusMain').textContent = s.building ? '正在构建' : (s.botRunning ? '运行中' : '已停止');
   $('#statusSub').textContent  = s.building ? '请稍候…'  : (s.botRunning ? 'bot 正常运行' : 'bot 未运行');
 
+  // 移动端细顶栏状态点
+  const mini = $('#statusMini');
+  if (mini) {
+    mini.className = 'mh-status ' + state;
+    const txt = $('#statusMiniTxt');
+    if (txt) txt.textContent = s.building ? '构建中' : (s.botRunning ? '运行中' : '已停止');
+  }
+
   // 顶栏按钮
   $('#btnRebuild').disabled = s.building;
 

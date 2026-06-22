@@ -15,6 +15,7 @@
     <div class="brand">
       <div class="mark">k</div>
       <div class="meta"><b>kohme</b><span>管理后台</span></div>
+      <button id="drawerClose" aria-label="收起菜单">&times;</button>
     </div>
 
     <div id="status" class="status stop">
@@ -26,15 +27,15 @@
     </div>
 
     <nav class="nav">
-      <a href="#sec-global">
+      <a data-view="global" href="#view-global">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
         全局设置
       </a>
-      <a href="#sec-driver">
+      <a data-view="driver" href="#view-driver">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 2v3M14 2v3M10 19v3M14 19v3M2 10h3M2 14h3M19 10h3M19 14h3"/></svg>
         驱动配置
       </a>
-      <a href="#sec-plugins">
+      <a data-view="plugins" href="#view-plugins">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v3a2 2 0 0 0 4 0V3h4a1 1 0 0 1 1 1v4h-3a2 2 0 1 0 0 4h3v4a1 1 0 0 1-1 1h-4v-3a2 2 0 1 0-4 0v3H5a1 1 0 0 1-1-1v-4H7a2 2 0 1 0 0-4H4V4a1 1 0 0 1 1-1z"/></svg>
         插件
       </a>
@@ -55,8 +56,22 @@
     </div>
   </aside>
 
+  <!-- ===== 移动端遮罩（点击收起抽屉）===== -->
+  <div id="scrim" class="scrim" aria-hidden="true"></div>
+
   <!-- ===== 主区 ===== -->
   <main class="main">
+    <!-- 移动端吸顶细顶栏（仅窄屏显示）-->
+    <div class="mobile-header">
+      <button id="drawerToggle" class="mh-burger" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="mh-brand"><span class="mark">k</span>kohme</span>
+      <span id="statusMini" class="mh-status stop">
+        <span class="led"></span><span id="statusMiniTxt">连接中</span>
+      </span>
+    </div>
+
     <header class="topbar">
       <div class="title"><b>运行控制</b><span>构建、重启与启停</span></div>
       <span class="spacer"></span>
@@ -72,7 +87,7 @@
       <div id="banner" class="banner"></div>
 
       <!-- 全局设置 -->
-      <section id="sec-global" class="section">
+      <section class="view" data-view="global" id="view-global">
         <h2 class="eyebrow">插件全局配置</h2>
         <div class="card">
           <div id="globalForm"></div>
@@ -84,7 +99,7 @@
       </section>
 
       <!-- 驱动配置 -->
-      <section id="sec-driver" class="section">
+      <section class="view" data-view="driver" id="view-driver">
         <h2 class="eyebrow">驱动配置 · config.json · ZeroBot</h2>
         <div class="card">
           <div id="driverForm"></div>
@@ -95,8 +110,8 @@
         </div>
       </section>
 
-      <!-- 插件 -->
-      <section id="sec-plugins" class="section">
+      <!-- 插件（按插件分页；具体页面由 plugins.js 渲染到 #plugins）-->
+      <section class="view" data-view="plugins" id="view-plugins">
         <h2 class="eyebrow">插件</h2>
         <div id="pluginDirty" class="banner">
           <span id="pluginDirtyText"></span>
@@ -105,10 +120,11 @@
           <button id="discardPlugins" class="btn btn--ghost btn--sm">放弃更改</button>
         </div>
         <div id="plugins"></div>
+        <div id="pluginEmpty" class="empty-state hide">还没有插件，点左侧「＋ 添加插件」新增一个。</div>
       </section>
 
       <!-- 添加插件 -->
-      <section id="sec-add" class="section">
+      <section class="view" data-view="add" id="view-add">
         <h2 class="eyebrow">添加插件</h2>
         <div class="card">
           <div class="grid">
@@ -116,7 +132,7 @@
             <div><label class="f">仓库 repo</label><input id="nRepo" type="text" class="mono"></div>
             <div><label class="f">版本 version</label><input id="nVer" type="text" placeholder="latest"></div>
           </div>
-          <div class="hint">添加只会把插件加入上方列表（仅公共配置；自定义配置 conf 需保存构建、bot 生成 schema 后才能编辑）。可继续增删多个插件，最后点列表上方的「保存并构建」一次性构建并重启。</div>
+          <div class="hint">插件默认从 github.com/kohmebot 下拉取</div>
           <div class="row-actions"><button id="addPlugin" class="btn btn--primary">添加插件</button></div>
         </div>
       </section>
@@ -128,7 +144,7 @@
 <section class="console">
   <div class="chead">
     <span class="ctitle"><span id="liveDot" class="live-dot"></span>运行日志</span>
-    <span class="csub">仅 kohme 二进制输出（构建日志见操作弹窗）</span>
+    <span class="csub">kohme 输出</span>
     <span class="spacer"></span>
     <label class="sw"><input id="autoscroll" type="checkbox" checked>自动滚动</label>
     <button id="clearLog">清空</button>
