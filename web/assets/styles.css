@@ -634,30 +634,79 @@ body.console-collapsed .toasts{bottom:calc(var(--console-collapsed-h) + var(--sp
 /* ==========================================================================
    响应式
    ========================================================================== */
+/* —— 平板 / 窄笔记本：侧栏转为顶部横条 —— */
 @media (max-width:920px){
   :root{--side-w:0px}
+
+  /* 关键修复：窄屏下骨架必须纵向堆叠。否则 .app 仍是横向 flex，
+     变回 static 的侧栏会与主区并排挤在一起（页面“一塌糊涂”的主因）。 */
+  .app{flex-direction:column;min-height:100%}
+
   .sidebar{
     position:static;width:100%;flex-direction:row;flex-wrap:wrap;align-items:center;
     gap:var(--sp-3);border-right:none;border-bottom:1px solid var(--line);
     padding:var(--sp-3) var(--sp-4);
   }
   .brand{margin-right:auto}
-  .status{order:3;flex:1 1 100%}
-  .nav{order:4;flex:1 1 100%;flex-direction:row;overflow-x:auto;gap:var(--sp-1)}
-  .nav a{white-space:nowrap}
-  .side-spacer{display:none}
   .account{order:2;border-top:none;padding-top:0;flex-direction:row;align-items:center;gap:var(--sp-3)}
   .account .links{gap:var(--sp-1)}
+  .status{order:3;flex:1 1 100%}
+  .nav{order:4;flex:1 1 100%;flex-direction:row;flex-wrap:wrap;gap:var(--sp-1)}
+  .nav a{white-space:nowrap}
+  .nav-sub{flex-direction:row;flex-wrap:wrap;border-left:none;margin-left:0;padding-left:0;gap:var(--sp-1)}
+  .side-spacer{display:none}
+
   .main{margin-left:0}
-  .console{left:0}
   .topbar{padding:var(--sp-3) var(--sp-4)}
-  .content{padding:var(--sp-4)}
+  .content{padding:var(--sp-4) var(--sp-4) var(--sp-8)}
+
+  .console{left:0}
   #pluginDirty{top:0}
+
+  /* 锚点定位避开更高的粘性顶栏 */
+  .section,.card{scroll-margin-top:120px}
 }
-@media (max-width:520px){
+
+/* —— 手机 —— */
+@media (max-width:600px){
+  /* 底部日志台缩小占用（配合 main.js 在手机上默认收起） */
+  :root{--console-h:190px}
+
+  /* iOS Safari 在输入框字号 < 16px 时会自动放大整页：手机上统一抬到 16px */
+  input[type=text],input[type=number],input[type=password],textarea,select,
+  input.mono,textarea.mono,select.mono,.tags-input,.slider-num,.color-hex{font-size:16px}
+
+  /* 顶栏运行控制：标题占一整行，四个按钮平铺成网格，便于点按 */
+  .topbar .title{flex:1 1 100%}
+  .topbar .spacer{display:none}
+  .controls{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2)}
+  .controls .btn{justify-content:center;min-height:42px}
+
+  /* 卡片收一点内边距，给内容更多横向空间；行内按钮更易点 */
+  .card{padding:var(--sp-4)}
+  .row-actions{gap:var(--sp-2)}
+  .row-actions .btn{min-height:42px}
+
+  /* 底部日志台头部：隐藏冗长副标题，允许换行 */
+  .console .chead{flex-wrap:wrap;height:auto;min-height:var(--console-collapsed-h);padding:var(--sp-2) var(--sp-3)}
+  .console .chead .csub{display:none}
+
+  /* 操作弹窗：头/脚允许换行，关闭按钮更好按 */
   .dialog--op{max-height:92vh}
-  .toasts{left:var(--sp-4);right:var(--sp-4)}
+  .ophead{flex-wrap:wrap}
+  .opfoot{flex-wrap:wrap}
+  .opfoot .hint{flex:1 1 100%;order:2}
+  .opfoot .btn{order:1;margin-left:auto;min-height:42px}
+  .dialog--auth{padding:var(--sp-5)}
+
+  /* toast 横铺 */
+  .toasts{left:var(--sp-3);right:var(--sp-3)}
   .toast{max-width:none}
+}
+
+/* —— 极窄屏：运行控制改单列 —— */
+@media (max-width:380px){
+  .controls{grid-template-columns:1fr}
 }
 
 /* ==========================================================================

@@ -25,7 +25,7 @@ function pick(s, rawProp, key) {
   return undefined;
 }
 
-function resolveSchema(node, root) {
+export function resolveSchema(node, root) {
   let n = node || {};
   let guard = 0;
   while (n && n.$ref && guard++ < 50) {

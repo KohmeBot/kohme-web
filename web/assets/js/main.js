@@ -19,7 +19,7 @@ async function action(kind, btn) {
   finally { setTimeout(() => { btn.disabled = false; }, 400); }
 }
 
-function wireButtons() {
+function wireEvent() {
   $('#btnRebuild').addEventListener('click', e => action('rebuild', e.currentTarget));
   $('#btnRestart').addEventListener('click', e => action('restart', e.currentTarget));
   $('#btnStart').addEventListener('click', e => action('start', e.currentTarget));
@@ -38,6 +38,15 @@ function wireButtons() {
       version: $('#nVer').value.trim(),
     });
     if (ok) { $('#nName').value = $('#nRepo').value = $('#nVer').value = ''; }
+  });
+
+  $('#nName').addEventListener('input',()=>{
+    const name = nName.value.trim();
+    if (name) {
+      nRepo.placeholder = `github.com/kohmebot/${name}`;
+    } else {
+      nRepo.placeholder = '';
+    }
   });
 
   $('#changePw').addEventListener('click', openChangePw);
@@ -88,8 +97,14 @@ async function boot() {
 function start() {
   initOps();
   initAuth(boot);
-  wireButtons();
+  wireEvent();
   initNav();
+
+  // 移动端默认收起底部日志台，避免吃掉过多竖向空间（用户可随时点按展开）
+  if (window.matchMedia && window.matchMedia('(max-width:600px)').matches) {
+    document.body.classList.add('console-collapsed');
+  }
+
   // 先探测是否已登录
   fetch('/api/config', { credentials: 'include' })
     .then(r => { if (r.status === 401) showAuth(); else boot(); })

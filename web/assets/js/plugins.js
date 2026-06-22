@@ -11,8 +11,9 @@
 import { $, el, toast } from './dom.js';
 import { api } from './api.js';
 import { runOp } from './ops.js';
-import { buildForm } from './schema-form.js';
+import { buildForm,resolveSchema } from './schema-form.js';
 import { PLUGIN_COMMON_SCHEMA } from './schema-defaults.js';
+
 
 let schemas = {};
 let committedJSON = '[]';
@@ -27,10 +28,12 @@ const coreCard = () => $('#plugins').querySelector('.card[data-builtin="1"]');
 // 去掉 schema 里由别处管理的字段（name/seq 始终去；core 再去掉这几个无意义字段）
 function commonSchemaFor(builtin) {
   const base = (schemas && schemas['kohme-plugin']) || PLUGIN_COMMON_SCHEMA;
-  const props = { ...(base.properties || {}) };
+  const root = base || {};
+  const top = resolveSchema(root, root);
+  const props = { ...(top.properties || {}) };
   ['name', 'seq'].forEach(k => delete props[k]);
   if (builtin) ['repo', 'version', 'disable', 'exclude'].forEach(k => delete props[k]);   // ⑦
-  return { ...base, properties: props };
+  return { ...top, properties: props };
 }
 
 // ---- 单个插件卡片 ----

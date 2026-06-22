@@ -302,9 +302,14 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 //
 // Validation errors returned by mutate (e.g. duplicate plugin name) abort
 // before any build happens and surface as a 400 to the browser.
-func mutatePluginsAndBuild(w http.ResponseWriter, mutate func(*Config) error) {
+func mutatePluginsAndBuild(w http.ResponseWriter, r *http.Request, mutate func(*Config) error) {
 	opMu.Lock()
 	defer opMu.Unlock()
+	// url?rebuild=true
+	rebuild := false
+	if v := r.URL.Query().Get("rebuild"); v == "true" {
+		rebuild = true
+	}
 
 	prev, err := store.Load()
 	if err != nil {
@@ -315,12 +320,20 @@ func mutatePluginsAndBuild(w http.ResponseWriter, mutate func(*Config) error) {
 		httpErr(w, err) // bad input / duplicate / not found — nothing built
 		return
 	}
-	if err := sup.BuildAndRestart(); err != nil {
+
+	if rebuild {
+		err = sup.BuildAndRestart()
+	} else {
+		err = sup.RestartBot()
+	}
+
+	if err != nil {
 		if rbErr := store.Save(prev); rbErr != nil {
 			hub.log("op", "[配置回滚失败] "+rbErr.Error())
 		} else {
 			hub.log("op", "[已回滚本次配置更改]")
 		}
+
 		sup.publishStatus()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -338,6 +351,7 @@ func handlePluginsBulk(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Plugins []pluginDTO `json:"plugins"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpErr(w, err)
 		return
@@ -365,7 +379,7 @@ func handlePluginsBulk(w http.ResponseWriter, r *http.Request) {
 			Exclude: d.Exclude, Disable: d.Disable, Groups: d.Groups, Conf: cv,
 		}
 	}
-	mutatePluginsAndBuild(w, func(c *Config) error {
+	mutatePluginsAndBuild(w, r, func(c *Config) error {
 		c.Plugins = next
 		return nil
 	})
@@ -394,7 +408,7 @@ func handleGlobalPut(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, err)
 		return
 	}
-	mutatePluginsAndBuild(w, func(c *Config) error {
+	mutatePluginsAndBuild(w, r, func(c *Config) error {
 		c.Path = body.Path
 		c.Groups = body.Groups
 		return nil
