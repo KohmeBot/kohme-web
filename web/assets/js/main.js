@@ -7,6 +7,7 @@ import { initAuth, logout, openChangePw, showAuth } from './auth.js';
 import { loadSchemas, load, saveGlobal, saveDriver } from './config.js';
 import * as Plugins from './plugins.js';
 import { connect } from './stream.js';
+import { initTheme } from './theme.js';
 
 // 注入插件模块所需的重载依赖（打破循环依赖）
 Plugins.bind({ load, loadSchemas });
@@ -120,6 +121,7 @@ async function boot() {
 }
 
 function start() {
+  initTheme();
   initOps();
   initAuth(boot);
   wireEvent();
