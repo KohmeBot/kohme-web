@@ -120,6 +120,12 @@ func main() {
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", http.FileServer(http.FS(sub)))
 
+	if *autostart {
+		if err := sup.StartBot(); err != nil {
+			log.Printf("自动启动 bot 跳过：%v（构建一次后即可运行）", err)
+		}
+	}
+
 	fmt.Println("──────────────────────────────────────────────")
 	fmt.Println("  kohme 管理后台已启动")
 	fmt.Printf("  地址:   http://%s\n", *addr)
@@ -133,12 +139,6 @@ func main() {
 		fmt.Printf("  初始化: 首次打开网页用此一次性口令创建账户密码: %s\n", token)
 	}
 	fmt.Println("──────────────────────────────────────────────")
-
-	if *autostart {
-		if err := sup.StartBot(); err != nil {
-			log.Printf("自动启动 bot 跳过：%v（构建一次后即可运行）", err)
-		}
-	}
 
 	log.Fatal(http.ListenAndServe(*addr, mux))
 }
@@ -403,8 +403,9 @@ func handleGlobalGet(w http.ResponseWriter, r *http.Request) {
 
 func handleGlobalPut(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Path   string  `json:"path"`
-		Groups []int64 `json:"groups"`
+		Path   string         `json:"path"`
+		Groups []int64        `json:"groups"`
+		Env    map[string]any `json:"env"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpErr(w, err)
@@ -413,6 +414,7 @@ func handleGlobalPut(w http.ResponseWriter, r *http.Request) {
 	mutatePluginsAndBuild(w, r, func(c *Config) error {
 		c.Path = body.Path
 		c.Groups = body.Groups
+		c.Other = body.Env
 		return nil
 	})
 }
