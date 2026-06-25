@@ -47,7 +47,7 @@ func main() {
 		botArgs    = flag.String("bot-args", "", "传给 bot 的额外参数，空格分隔")
 		buildStr   = flag.String("build", "", "构建命令，默认 linux/mac 用 build.sh、windows 用 build.bat")
 		tok        = flag.String("token", "", "首次初始化账户用的一次性口令。留空则自动随机生成并打印到终端")
-		authPath   = flag.String("auth", "kadmin-auth.json", "存放账户密码（已加盐哈希）的文件路径")
+		authPath   = flag.String("auth", "./data/kadmin-auth.json", "存放账户密码（已加盐哈希）的文件路径")
 		resetAuth  = flag.Bool("reset-auth", false, "清除已设置的账户，重新走首次初始化流程")
 		autostart  = flag.Bool("autostart", true, "启动后台时若已有 bot 二进制则自动拉起 bot")
 	)

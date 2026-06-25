@@ -22,6 +22,9 @@
   --surface-2:#f3f3fb;
   --surface-3:#eaeaf5;
   --glass:rgba(255,255,255,.72);
+  /* ③：用于侧栏/弹窗等“材质面板”的玻璃底，配合更强的高斯模糊 */
+  --glass-panel:rgba(255,255,255,.74);
+  --glass-blur:22px;
 
   /* 文字 */
   --ink:#191925;
@@ -44,14 +47,24 @@
   --warn:#c0860f;      --warn-soft:#f8efd9;
   --danger:#d23f30;    --danger-soft:#fbe8e6;
 
-  /* 终端（两个主题下都偏深，作为有意的“深色面板”） */
-  --term-bg:#0c0c14;
-  --term-bg-2:#13131c;
-  --term-line:#23232f;
-  --term-ink:#cfcfd8;
-  --term-faint:#6b6b7a;
-  --term-blue:#9ec5ff;
-  --term-green:#a9e6c0;
+  /* 终端 · 白天版（②：控制台改为跟随主题，不再常驻深色）
+     白天给一套柔和的浅色面板，既保留“日志台”的辨识度又不突兀；
+     暗色版在 [data-theme="dark"] 中覆盖回深色。 */
+  --term-bg:#f3f3fb;
+  --term-bg-2:#eaeaf4;
+  --term-line:#e2e2ef;
+  --term-ink:#3b3b4d;
+  --term-faint:#9a9aac;
+  --term-blue:#3b5bd6;            /* 操作弹窗输出行 */
+  --term-green:#1c8a5c;           /* bot 输出行 */
+  /* 头部/按钮/滚动条等原先硬编码的灰，统一收进变量以便随主题切换 */
+  --term-head:#5a5a6e;
+  --term-head-strong:#2c2c3a;
+  --term-btn-bd-hover:var(--line-strong);
+  --term-btn-ink-hover:var(--ink);
+  --term-btn-bg-hover:rgba(20,18,55,.05);
+  --term-scroll:#d2d2e0;
+  --term-scroll-hover:#bcbccc;
 
   /* 字体 */
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
@@ -79,6 +92,7 @@
   /* 动效 · 缓动与时长 */
   --ease:cubic-bezier(.4,0,.2,1);
   --ease-out:cubic-bezier(.16,1,.3,1);
+  --ease-ios:cubic-bezier(.32,.72,0,1);      /* iOS 风：起步快、尾段长缓，做“顺滑滑入”观感 */
   --spring:cubic-bezier(.34,1.56,.64,1);     /* 弹性 overshoot */
   --spring-soft:cubic-bezier(.22,1.28,.42,1);
   --dur-1:130ms; --dur-2:220ms; --dur-3:360ms; --dur-4:520ms;
@@ -125,6 +139,25 @@
   --sh-lg:0 30px 70px rgba(0,0,0,.6);
   --glow-accent:0 0 0 1px rgba(155,140,255,.26),0 12px 36px rgba(123,110,240,.4);
   --glow-run:0 0 0 1px rgba(51,214,230,.28),0 0 28px rgba(51,214,230,.3);
+
+  /* ③：玻璃面板（暗色） */
+  --glass-panel:rgba(18,18,28,.66);
+
+  /* 终端 · 黑夜版（覆盖回深色面板） */
+  --term-bg:#0c0c14;
+  --term-bg-2:#13131c;
+  --term-line:#23232f;
+  --term-ink:#cfcfd8;
+  --term-faint:#6b6b7a;
+  --term-blue:#9ec5ff;
+  --term-green:#a9e6c0;
+  --term-head:#bcbcc6;
+  --term-head-strong:#d8d8e0;
+  --term-btn-bd-hover:#4a4a58;
+  --term-btn-ink-hover:#ffffff;
+  --term-btn-bg-hover:rgba(255,255,255,.06);
+  --term-scroll:#2f2f3b;
+  --term-scroll-hover:#41414f;
 }
 
 /* 主题切换瞬间：给一个短暂的全局色彩过渡，做优雅的交叉淡入（theme.js 加/去 class） */
@@ -186,6 +219,13 @@ h1{font-size:var(--fs-lg);font-weight:680;margin:0;letter-spacing:-.012em}
 .hint{font-size:var(--fs-xs);color:var(--muted);margin-top:var(--sp-1);line-height:1.5}
 .hide{display:none !important}
 
+/* ①/③ 兜底：不支持 backdrop-filter 的浏览器，把所有玻璃面退回不透明，
+   避免半透明叠在极光背景上导致文字不可读。 */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root{--glass:#ffffff;--glass-panel:#ffffff}
+  :root[data-theme="dark"]{--glass:#14141e;--glass-panel:#14141e}
+}
+
 /* ==========================================================================
    应用骨架：侧栏 + 主区
    ========================================================================== */
@@ -198,7 +238,9 @@ h1{font-size:var(--fs-lg);font-weight:680;margin:0;letter-spacing:-.012em}
   padding:var(--sp-5) var(--sp-4);
   background:
     linear-gradient(180deg,var(--grad-soft),transparent 220px),
-    var(--surface);
+    var(--glass-panel);
+  -webkit-backdrop-filter:saturate(180%) blur(var(--glass-blur));
+  backdrop-filter:saturate(180%) blur(var(--glass-blur));
   border-right:1px solid var(--line);
   z-index:30;overflow:hidden;
 }
@@ -605,21 +647,22 @@ body.console-collapsed .console{height:var(--console-collapsed-h)}
 .console .chead{
   display:flex;align-items:center;gap:var(--sp-3);
   padding:0 var(--sp-4);height:var(--console-collapsed-h);flex:none;
-  border-bottom:1px solid var(--term-line);color:#bcbcc6;font-size:var(--fs-sm);
+  border-bottom:1px solid var(--term-line);color:var(--term-head);font-size:var(--fs-sm);
+  background:var(--term-bg-2);
 }
-.console .chead .ctitle{display:flex;align-items:center;gap:var(--sp-2);font-weight:680;color:#d8d8e0}
+.console .chead .ctitle{display:flex;align-items:center;gap:var(--sp-2);font-weight:680;color:var(--term-head-strong)}
 .console .chead .csub{color:var(--term-faint);font-size:var(--fs-xs)}
 .console .chead .spacer{flex:1}
-.console .chead .sw{color:#bcbcc6;font-size:var(--fs-xs)}
+.console .chead .sw{color:var(--term-head);font-size:var(--fs-xs)}
 .console .chead .sw input{width:34px;height:19px}
 .console .chead .sw input::after{width:15px;height:15px}
 .console .chead .sw input:checked::after{transform:translateX(15px)}
 .console .chead button{
-  background:transparent;border:1px solid var(--term-line);color:#bcbcc6;
+  background:transparent;border:1px solid var(--term-line);color:var(--term-head);
   padding:5px 11px;font-size:var(--fs-xs);border-radius:var(--r-sm);cursor:pointer;
   transition:border-color var(--dur-1),color var(--dur-1),background var(--dur-1),transform var(--dur-2) var(--spring);
 }
-.console .chead button:hover{border-color:#4a4a58;color:#fff;background:rgba(255,255,255,.05);transform:translateY(-1px)}
+.console .chead button:hover{border-color:var(--term-btn-bd-hover);color:var(--term-btn-ink-hover);background:var(--term-btn-bg-hover);transform:translateY(-1px)}
 .collapse-ico{transition:transform var(--dur-3) var(--spring)}
 body.console-collapsed .collapse-ico{transform:rotate(180deg)}
 
@@ -640,8 +683,8 @@ body.console-collapsed .log{display:none}
 
 /* 终端滚动条 */
 .log::-webkit-scrollbar,.oplog::-webkit-scrollbar{width:10px;height:10px}
-.log::-webkit-scrollbar-thumb,.oplog::-webkit-scrollbar-thumb{background:#2f2f3b;border-radius:var(--r-full);border:2px solid transparent;background-clip:padding-box}
-.log::-webkit-scrollbar-thumb:hover,.oplog::-webkit-scrollbar-thumb:hover{background:#41414f;background-clip:padding-box}
+.log::-webkit-scrollbar-thumb,.oplog::-webkit-scrollbar-thumb{background:var(--term-scroll);border-radius:var(--r-full);border:2px solid transparent;background-clip:padding-box}
+.log::-webkit-scrollbar-thumb:hover,.oplog::-webkit-scrollbar-thumb:hover{background:var(--term-scroll-hover);background-clip:padding-box}
 
 /* ==========================================================================
    遮罩 / 弹窗
@@ -649,15 +692,18 @@ body.console-collapsed .log{display:none}
 .overlay{
   position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
   padding:var(--sp-4);
-  background:rgba(10,10,20,.5);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
+  background:rgba(10,10,20,.5);backdrop-filter:blur(8px) saturate(120%);-webkit-backdrop-filter:blur(8px) saturate(120%);
   animation:fadeIn var(--dur-2) var(--ease);
 }
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .dialog{
-  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);
-  box-shadow:var(--sh-lg);animation:dialogIn var(--dur-3) var(--spring);
+  background:var(--glass-panel);
+  -webkit-backdrop-filter:saturate(180%) blur(var(--glass-blur));
+  backdrop-filter:saturate(180%) blur(var(--glass-blur));
+  border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--sh-lg);animation:dialogIn var(--dur-4) var(--spring) both;
 }
-@keyframes dialogIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes dialogIn{from{opacity:0;transform:translateY(20px) scale(.94);filter:blur(6px)}60%{filter:blur(0)}to{opacity:1;transform:none;filter:none}}
 
 /* 登录 / 设置 / 改密 弹窗 */
 .dialog--auth{width:368px;max-width:100%;padding:var(--sp-6)}
@@ -711,7 +757,9 @@ body.console-collapsed .log{display:none}
 body.console-collapsed .toasts{bottom:calc(var(--console-collapsed-h) + var(--sp-5))}
 .toast{
   pointer-events:auto;min-width:200px;max-width:340px;
-  background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+  background:var(--glass-panel);
+  -webkit-backdrop-filter:saturate(180%) blur(16px);backdrop-filter:saturate(180%) blur(16px);
+  border:1px solid var(--line);border-left:3px solid var(--accent);
   border-radius:var(--r-md);box-shadow:var(--sh-md);
   padding:11px 15px;font-size:var(--fs-base);color:var(--ink);
   animation:toastIn var(--dur-3) var(--spring);
@@ -752,6 +800,14 @@ body.console-collapsed .toasts{bottom:calc(var(--console-collapsed-h) + var(--sp
 @media (max-width:900px){
   :root{--side-w:0px;--mhead-h:56px}
 
+  /* ①：手机上 backdrop-filter 性能/支持都弱，叠在极光背景上的半透明吸顶栏
+     文字会发灰发糊。这里大幅提高玻璃不透明度、收紧模糊，保证可读性。 */
+  :root{--glass:rgba(255,255,255,.94);--glass-panel:rgba(255,255,255,.94);--glass-blur:12px}
+  :root[data-theme="dark"]{--glass:rgba(16,16,24,.9);--glass-panel:rgba(16,16,24,.9)}
+  .topbar,.mobile-header{
+    -webkit-backdrop-filter:saturate(150%) blur(10px);backdrop-filter:saturate(150%) blur(10px);
+  }
+
   .main{margin-left:0}
 
   /* ---- 移动端吸顶细顶栏 ---- */
@@ -791,7 +847,10 @@ body.console-collapsed .toasts{bottom:calc(var(--console-collapsed-h) + var(--sp
   /* ---- 侧栏 → 左侧抽屉 ---- */
   .sidebar{
     position:fixed;inset:0 auto 0 0;width:min(294px,86vw);
-    transform:translateX(-100%);transition:transform var(--dur-3) var(--spring-soft);
+    /* 抽屉叠在内容之上，保持不透明以确保可读性（覆盖桌面的玻璃材质） */
+    background:linear-gradient(180deg,var(--grad-soft),transparent 220px),var(--surface);
+    -webkit-backdrop-filter:none;backdrop-filter:none;
+    transform:translateX(-100%);transition:transform var(--dur-3) var(--ease-ios);
     z-index:50;overflow-y:auto;border-right:1px solid var(--line);
   }
   body.drawer-open .sidebar{transform:none;box-shadow:var(--sh-lg)}
@@ -876,8 +935,22 @@ html{scroll-behavior:smooth}
    视图切换（全局 / 驱动 / 插件分页 / 添加）— 弹性进场
    ========================================================================== */
 .view{display:none}
-.view.is-active{display:block;animation:viewIn var(--dur-3) var(--spring-soft) both}
-@keyframes viewIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:none}}
+.view.is-active{display:block;animation:viewIn var(--dur-4) var(--ease-ios) both}
+@keyframes viewIn{
+  0%  {opacity:0;transform:translateY(20px) scale(.985);filter:blur(8px)}
+  55% {filter:blur(0)}
+  100%{opacity:1;transform:none;filter:none}
+}
+/* iOS 式内容级联：整页滑入后，页内主要块再依次轻轻落位，制造层次与“呼吸感” */
+.view.is-active > *{animation:cascadeIn var(--dur-3) var(--spring-soft) both}
+.view.is-active > *:nth-child(1){animation-delay:.04s}
+.view.is-active > *:nth-child(2){animation-delay:.10s}
+.view.is-active > *:nth-child(3){animation-delay:.16s}
+.view.is-active > *:nth-child(4){animation-delay:.22s}
+@keyframes cascadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .view.is-active,.view.is-active > *{animation:none}
+}
 
 .empty-state{
   border:1px dashed var(--line-strong);border-radius:var(--r-lg);
@@ -893,7 +966,7 @@ html{scroll-behavior:smooth}
    插件页：页头 + 简介/配置页签 + 面板
    ========================================================================== */
 .plugin-page{display:none}
-.plugin-page.is-active{display:block}
+.plugin-page.is-active{display:block;animation:viewIn var(--dur-3) var(--ease-ios) both}
 
 .pp-head{margin-bottom:var(--sp-5)}
 .pp-titlerow{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3)}
@@ -917,7 +990,7 @@ html{scroll-behavior:smooth}
 .pp-tab:focus-visible{outline:none;box-shadow:var(--sh-focus)}
 
 /* 面板：默认隐藏，仅当前页签 .show 显示 */
-.plugin-pane{display:none;animation:viewIn var(--dur-2) var(--spring-soft) both}
+.plugin-pane{display:none;animation:viewIn var(--dur-3) var(--ease-ios) both}
 .plugin-pane.show{display:block}
 .plugin-page.isnew .card{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--sh-md)}
 .plugin-page.pending-del{opacity:.6}

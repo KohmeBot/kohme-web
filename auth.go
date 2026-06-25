@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -36,6 +37,7 @@ func NewAuthStore(path string) *AuthStore {
 }
 
 func (a *AuthStore) load() {
+	_ = os.MkdirAll(filepath.Dir(a.path), 0700)
 	b, err := os.ReadFile(a.path)
 	if err != nil {
 		return
